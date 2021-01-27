@@ -7,25 +7,24 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 
-def cross_entropy_loss_fn(pad_token_id):
+def cross_entropy_loss_fn(pad_token_id = None):
     """Returns a cross-entropy loss function that ignores positions with
     padding tokens"""
     return nn.CrossEntropyLoss(ignore_index=pad_token_id)
-
+    
 class Seq2seqRNNTrainer:
 
     def __init__(self,
                  model,
                  train_dataloader,
                  val_dataloader,
-                 loss_fn,
                  learning_rate: float = 3e-4,
+                 pad_token_id = None,
                  gradient_clip: float = 99999,
                  teacher_forcing: float = 0.0):
         self.model = model
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
-        self.loss_fn = loss_fn
         self.gradient_clip = gradient_clip
         self.teacher_forcing = teacher_forcing
 
@@ -34,6 +33,7 @@ class Seq2seqRNNTrainer:
         print(f'Train size: {self.train_size:,}')
         print(f'Val size: {self.val_size:,}')
 
+        self.loss_fn = cross_entropy_loss_fn(pad_token_id)
         self.optimizer = Adam(model.parameters(), lr=learning_rate)
 
     @staticmethod
@@ -138,13 +138,13 @@ if __name__ == '__main__':
                     freeze_embeddings=False)
 
     # TODO: double-check if NLL or CEL?
-    loss_fn = cross_entropy_loss_fn(dw.pad_token_id)
+    # loss_fn = cross_entropy_loss_fn(dw.pad_token_id)
 
     trainer = Seq2seqRNNTrainer(model,
                                 train_iter,
                                 val_iter,
-                                loss_fn,
                                 learning_rate=3e-4,
+                                pad_token_id=dw.pad_token_id,
                                 gradient_clip=99999,
                                 teacher_forcing=0.5)
 
