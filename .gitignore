@@ -1,0 +1,6 @@
+*.csv
+*.json
+.vector_cache/
+.ipynb_checkpoints/
+.idea/
+__pycache__/
