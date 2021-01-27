@@ -224,3 +224,7 @@ class DataWrapper:
     def tokenStr2Int(self, token_str):
         return self.vocab.stoi[token_str]
 
+def get_dataset_size(dataloader):
+    """Returns size of the underlying data behind the 'dataloader'"""
+    batch = next(iter(dataloader))
+    return len(batch.dataset)

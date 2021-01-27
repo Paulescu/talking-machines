@@ -3,9 +3,12 @@ import math
 import pdb
 
 from tqdm.auto import tqdm
+import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
+
+from data_util import get_dataset_size
 
 def cross_entropy_loss_fn(pad_token_id = None):
     """Returns a cross-entropy loss function that ignores positions with
@@ -28,19 +31,11 @@ class Seq2seqRNNTrainer:
         self.gradient_clip = gradient_clip
         self.teacher_forcing = teacher_forcing
 
-        self.train_size = self._get_dataset_size(self.train_dataloader)
-        self.val_size = self._get_dataset_size(self.val_dataloader)
-        print(f'Train size: {self.train_size:,}')
-        print(f'Val size: {self.val_size:,}')
+        self.train_size = get_dataset_size(self.train_dataloader)
+        self.val_size = get_dataset_size(self.val_dataloader)
 
         self.loss_fn = cross_entropy_loss_fn(pad_token_id)
         self.optimizer = Adam(model.parameters(), lr=learning_rate)
-
-    @staticmethod
-    def _get_dataset_size(dataloader):
-        """Returns size of the underlying data behind the 'dataloader'"""
-        batch = next(iter(dataloader))
-        return len(batch.dataset)
 
     def train(self, epoch):
         self.iteration(epoch, self.train_dataloader, self.train_size)
@@ -52,9 +47,9 @@ class Seq2seqRNNTrainer:
 
     def iteration(self, epoch, dataloader, dataset_size, train=True):
         if train:
-            model.train()
+            self.model.train()
         else:
-            model.eval()
+            self.model.eval()
         
         epoch_loss = 0
         epoch_accuracy = 0
@@ -63,7 +58,7 @@ class Seq2seqRNNTrainer:
                 # forward step
                 src, src_len = batch.src
                 tgt_input, _ = batch.tgt
-                tgt_output_scores = model(
+                tgt_output_scores = self.model(
                     src,
                     src_len,
                     tgt_input, teacher_forcing=self.teacher_forcing
