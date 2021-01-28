@@ -25,7 +25,7 @@ class Seq2seqRNNTrainer:
                  pad_token_id = None,
                  gradient_clip: float = 99999,
                  teacher_forcing: float = 0.0,
-                 with_cuda: boolean = True):
+                 with_cuda: bool = True):
         cuda_condition = torch.cuda.is_available() and with_cuda
         self.device = torch.device('cuda' if cuda_condition else 'cpu')
         
@@ -43,22 +43,25 @@ class Seq2seqRNNTrainer:
 
         self.n_epochs_trained = 0
 
-    def train(n_epochs):
+    def train(self, n_epochs):
         for epoch in range(n_epochs):
-            train_metrics = self._train_iteration(epoch)
-            test_metrics = self._test_iteration(epoch)
-            self._print_iteration_metrics(train_metrics, test_metrics)
+            train_loss, train_ppl = self._train_iteration(epoch)
+            test_loss, test_ppl = self._test_iteration(epoch)
+
+            # print metrics to console            
+            log = 'Epoch: {:03d}, Train loss: {:.4f}, Val loss: {:.4f}, Train ppl: {:.1f}, Val ppl: {:.1f}'
+            print(log.format(epoch, train_loss, test_loss, train_ppl, test_ppl))
 
             # update internal variable
             self.n_epochs_trained += 1
 
     def _train_iteration(self, epoch):
-        self._iteration(epoch, self.train_dataloader, self.train_size)
+        return self._iteration(epoch, self.train_dataloader, self.train_size)
     
     def _test_iteration(self, epoch):
         with torch.no_grad():
-            self._iteration(epoch, self.val_dataloader, self.val_size,
-                            train=False)
+            return self._iteration(epoch, self.val_dataloader, self.val_size,
+                                   train=False)
 
     def _iteration(self, epoch, dataloader, dataset_size, train=True):
         if train:
@@ -100,12 +103,12 @@ class Seq2seqRNNTrainer:
 
         epoch_loss = epoch_loss / dataset_size
         perplexity = math.exp(epoch_loss)
-        mode = 'train' if train else 'test'
-        print(f'Epoch {epoch}: {mode} | '
-               f'Loss: {epoch_loss:7.3f} | '
-               f'Perplexity: {perplexity:7.3f}')
+        # mode = 'train' if train else 'test'
+        # print(f'Epoch {epoch}: {mode} | '
+        #        f'Loss: {epoch_loss:7.3f} | '
+        #        f'Perplexity: {perplexity:7.3f}')
         
-        # return epoch_loss
+        return epoch_loss, perplexity
 
 def minutes_seconds_elapsed(start_time, end_time):
     elapsed_time = end_time - start_time
