@@ -112,7 +112,7 @@ class EncoderRNN(nn.Module):
         # 'last_step_cell_state' to correspond to the last non-padding token in
         # the input sequence, NOT the last token.
         packed_embedded = pack_padded_sequence(embedded,
-                                               src_len,
+                                               src_len.cpu(),
                                                batch_first=True,
                                                enforce_sorted=False)
         
@@ -225,6 +225,8 @@ if __name__ == '__main__':
     import torch
     from data_util import DataWrapper
     
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    
     # Datasets
     dw = DataWrapper()
     train_ds, validation_ds, test_ds = dw.get_datasets(
@@ -237,7 +239,7 @@ if __name__ == '__main__':
     train_iter, validation_iter, test_iter = dw.get_dataloaders(
         train_ds, validation_ds, test_ds,
         batch_size=2400,
-        device=torch.device("cpu")
+        device=device
     )
 
     # model architecture

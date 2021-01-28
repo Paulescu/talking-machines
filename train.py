@@ -24,8 +24,12 @@ class Seq2seqRNNTrainer:
                  learning_rate: float = 3e-4,
                  pad_token_id = None,
                  gradient_clip: float = 99999,
-                 teacher_forcing: float = 0.0):
-        self.model = model
+                 teacher_forcing: float = 0.0,
+                 with_cuda: boolean = True):
+        cuda_condition = torch.cuda.is_available() and with_cuda
+        self.device = torch.device('cuda' if cuda_condition else 'cpu')
+        
+        self.model = model.to(self.device)
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
         self.gradient_clip = gradient_clip
@@ -37,15 +41,26 @@ class Seq2seqRNNTrainer:
         self.loss_fn = cross_entropy_loss_fn(pad_token_id)
         self.optimizer = Adam(model.parameters(), lr=learning_rate)
 
-    def train(self, epoch):
-        self.iteration(epoch, self.train_dataloader, self.train_size)
-    
-    def validate(self, epoch):
-        with torch.no_grad():
-            self.iteration(epoch, self.val_dataloader, self.val_size,
-                           train=False)
+        self.n_epochs_trained = 0
 
-    def iteration(self, epoch, dataloader, dataset_size, train=True):
+    def train(n_epochs):
+        for epoch in range(n_epochs):
+            train_metrics = self._train_iteration(epoch)
+            test_metrics = self._test_iteration(epoch)
+            self._print_iteration_metrics(train_metrics, test_metrics)
+
+            # update internal variable
+            self.n_epochs_trained += 1
+
+    def _train_iteration(self, epoch):
+        self._iteration(epoch, self.train_dataloader, self.train_size)
+    
+    def _test_iteration(self, epoch):
+        with torch.no_grad():
+            self._iteration(epoch, self.val_dataloader, self.val_size,
+                            train=False)
+
+    def _iteration(self, epoch, dataloader, dataset_size, train=True):
         if train:
             self.model.train()
         else:
@@ -62,12 +77,12 @@ class Seq2seqRNNTrainer:
                     src,
                     src_len,
                     tgt_input, teacher_forcing=self.teacher_forcing
-                )
+                ).to(self.device)
 
                 # compute batch loss after a bit of reshaping
                 vocab_size = tgt_output_scores.shape[-1]
                 tgt_output_scores = tgt_output_scores.reshape(-1, vocab_size)               
-                tgt_output = tgt_input[:, 1:].reshape(-1)        
+                tgt_output = tgt_input[:, 1:].reshape(-1)
                 loss = self.loss_fn(tgt_output_scores, tgt_output)
 
                 if train:
@@ -144,6 +159,4 @@ if __name__ == '__main__':
                                 teacher_forcing=0.5)
 
     n_epochs = 10
-    for epoch in range(n_epochs):
-        trainer.train(epoch)
-        trainer.validate(epoch)
+    trainer.train(n_epochs)
