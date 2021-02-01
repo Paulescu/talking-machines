@@ -53,11 +53,16 @@ class Seq2seqRNNTrainer:
         
         # state variables
         self.min_test_loss = float('inf')
+        self.min_test_perplexity = float('inf')
         self.n_epochs = 0
+        
         if isinstance(checkpoint_dir, str):
             self.checkpoint_dir = Path(checkpoint_dir)
         else:
             self.checkpoint_dir = checkpoint_dir
+        is not self.checkpoint_dir.exists():
+            os.mkdir(self.checkpoint_dir)
+
         self.run_id = get_random_id()
 
     def train(self, n_epochs):
@@ -127,14 +132,14 @@ class Seq2seqRNNTrainer:
 
     def save_checkpoint(self):
         
+        # save trainer state
         state = {
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'epoch': self.n_epochs,
             'loss': self.min_test_loss,
+            'perplexity': self.min_test_perplexity,
         }
-
-        # save state
         dir = self.checkpoint_dir / f'{self.run_id}'
         if not dir.exists():
             os.mkdir(dir)
@@ -142,9 +147,8 @@ class Seq2seqRNNTrainer:
         torch.save(state, file)
         print(f'{file} was saved')
 
-        # save json with hyperparameters
-        json_file = str(dir / f'params.json')
-        # pdb.set_trace()
+        # save model hyperparameters
+        json_file = dir / f'params.json'
         with open(json_file, 'w') as f:
             json.dump(self.model.hyperparams, f)
         print(f'{json_file} file was saved')
@@ -171,6 +175,7 @@ class Seq2seqRNNTrainer:
         self.optimizer.load_state_dict(state['optimizer_state_dict'])
         self.n_epochs = int(state['n_epochs'])
         self.min_test_loss = float(state['loss'])
+        self.min_test_perplexity = float(state['perplexity'])
         self.run_id = run_id     
 
 

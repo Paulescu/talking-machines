@@ -5,6 +5,8 @@ import uuid
 def get_random_id():
     return str(uuid.uuid1())
 
+from pathlib import Path
+from typing import List, Union
 import tarfile
 def download_artifacts(name: str, files: List[Union[str, Path]]):
     """Compresses 'files' into a 'name.tar.gz' and downloads it"""
@@ -16,8 +18,8 @@ def download_artifacts(name: str, files: List[Union[str, Path]]):
 
     # download tar file
     from google.colab import files
-    files.download(tar)
-    print(f'Downloaded {tar}')
+    files.download(f"{name}.tar.gz")
+    print(f'Downloaded {name}.tar.gz')
 
 def minutes_seconds_elapsed(start_time, end_time):
     elapsed_time = end_time - start_time

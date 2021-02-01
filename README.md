@@ -1,6 +1,7 @@
 # Next steps
 
-- [ ] Save model checkpoints during training.
+- [x] Save model checkpoints during training.
+- [ ] Get a decent model.
 - [ ] Load model from checkpoint.
 - [ ] Allow inference.
 - [ ] Implement dynamic chat.
