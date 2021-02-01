@@ -24,6 +24,10 @@ class Seq2seqRNN(nn.Module):
         super(Seq2seqRNN, self).__init__()
 
         self.vocab_size = vocab_size
+        self.embedding_dim = embedding_dim
+        self.hidden_dim = hidden_dim
+        self.n_layers = n_layers
+        self.n_directions_encoder = n_directions_encoder
 
         # We use the same embedding layer in the encoder and in the decoder.
         # We let the user choose between using pre-trained GloVe embeddings or
@@ -33,8 +37,10 @@ class Seq2seqRNN(nn.Module):
                 'pretrained_embeddings shape must be (vocab_size, embedding_dim)'
             self.embedding = nn.Embedding.from_pretrained(
                 pretrained_embeddings, freeze=freeze_embeddings)
+            self.pretrained_embeddings = True
         else:
             self.embedding = nn.Embedding(vocab_size, embedding_dim)
+            self.pretrained_embeddings = False
 
         # encoder network
         self.encoder = EncoderRNN(self.embedding,
@@ -74,6 +80,27 @@ class Seq2seqRNN(nn.Module):
         )
 
         return tgt_output_logits
+    
+    @property
+    def hyperparams(self):
+        return {
+            'vocab_size': self.vocab_size,
+            'embedding_dim': self.embedding_dim,
+            'hidden_dim': self.hidden_dim,
+            'n_layers': self.n_layers,
+            'n_directions_encoder': self.n_directions_encoder,
+            'pretrained_embeddings': self.pretrained_embeddings,
+        }
+
+    @property
+    def id(self):
+        """str that uniquely identifies the hyperparameters of the model"""
+        return '_'.join([str(self.vocab_size),
+                         str(self.embedding_dim),
+                         str(self.hidden_dim),
+                         str(self.n_layers),
+                         str(self.n_directions_encoder)])
+
     
 class EncoderRNN(nn.Module):
 

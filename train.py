@@ -1,6 +1,10 @@
 # Train script
+import os
+import json
 import math
+from pathlib import Path
 import pdb
+from typing import Union, List
 
 from tqdm.auto import tqdm
 import torch
@@ -8,6 +12,11 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 
+from util import (
+    count_trainable_parameters,
+    get_random_id,
+    download_artifacts
+)
 from data_util import get_dataset_size
 
 def cross_entropy_loss_fn(pad_token_id = None):
@@ -25,7 +34,8 @@ class Seq2seqRNNTrainer:
                  pad_token_id = None,
                  gradient_clip: float = 99999,
                  teacher_forcing: float = 0.0,
-                 with_cuda: bool = True):
+                 with_cuda: bool = True,
+                 checkpoint_dir: Union[str, Path] = Path('./')):
         cuda_condition = torch.cuda.is_available() and with_cuda
         self.device = torch.device('cuda' if cuda_condition else 'cpu')
         
@@ -40,8 +50,15 @@ class Seq2seqRNNTrainer:
 
         self.loss_fn = cross_entropy_loss_fn(pad_token_id)
         self.optimizer = Adam(model.parameters(), lr=learning_rate)
-
-        self.n_epochs_trained = 0
+        
+        # state variables
+        self.min_test_loss = float('inf')
+        self.n_epochs = 0
+        if isinstance(checkpoint_dir, str):
+            self.checkpoint_dir = Path(checkpoint_dir)
+        else:
+            self.checkpoint_dir = checkpoint_dir
+        self.run_id = get_random_id()
 
     def train(self, n_epochs):
         for epoch in range(n_epochs):
@@ -53,7 +70,12 @@ class Seq2seqRNNTrainer:
             print(log.format(epoch, train_loss, test_loss, train_ppl, test_ppl))
 
             # update internal variable
-            self.n_epochs_trained += 1
+            self.n_epochs += 1
+
+            # save checkpoint if test loss improves
+            if test_loss < self.min_test_loss:
+                self.min_test_loss = test_loss
+                self.save_checkpoint()
 
     def _train_iteration(self, epoch):
         return self._iteration(epoch, self.train_dataloader, self.train_size)
@@ -98,23 +120,60 @@ class Seq2seqRNNTrainer:
                 epoch_loss += batch.batch_size * loss.item()
 
                 pbar.update(batch.batch_size)
-                # pbar.write('epoch_loss')               
-                # pdb.set_trace()
 
         epoch_loss = epoch_loss / dataset_size
         perplexity = math.exp(epoch_loss)
-        # mode = 'train' if train else 'test'
-        # print(f'Epoch {epoch}: {mode} | '
-        #        f'Loss: {epoch_loss:7.3f} | '
-        #        f'Perplexity: {perplexity:7.3f}')
-        
         return epoch_loss, perplexity
 
-def minutes_seconds_elapsed(start_time, end_time):
-    elapsed_time = end_time - start_time
-    elapsed_mins = int(elapsed_time / 60)
-    elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
-    return elapsed_mins, elapsed_secs
+    def save_checkpoint(self):
+        
+        state = {
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'epoch': self.n_epochs,
+            'loss': self.min_test_loss,
+        }
+
+        # save state
+        dir = self.checkpoint_dir / f'{self.run_id}'
+        if not dir.exists():
+            os.mkdir(dir)
+        file = dir / f'{self.n_epochs}.ckpt'
+        torch.save(state, file)
+        print(f'{file} was saved')
+
+        # save json with hyperparameters
+        json_file = str(dir / f'params.json')
+        # pdb.set_trace()
+        with open(json_file, 'w') as f:
+            json.dump(self.model.hyperparams, f)
+        print(f'{json_file} file was saved')
+
+        # download it if running in Colab
+        # download_artifacts(name=self.run_id, files=[file, json_file])
+        try:
+            download_artifacts(name=self.run_id, files=[file, json_file])
+        except:
+            pass
+
+    def load_checkpoint(self, run_id, epoch=None):
+        
+        checkpoint_dir = self.checkpoint_dir / run_id
+        if epoch:
+            checkpoint_file = checkpoint_dir / f'{epoch}.ckpt'
+        else:
+            # load latest checkpoint
+            checkpoint_file = get_latest_checkpoint_file(checkpoint_dir)
+        
+        # set state
+        state = torch.load(checkpoint_file)
+        self.model.load_state_dict(state['model_state_dict'])
+        self.optimizer.load_state_dict(state['optimizer_state_dict'])
+        self.n_epochs = int(state['n_epochs'])
+        self.min_test_loss = float(state['loss'])
+        self.run_id = run_id     
+
+
 
 if __name__ == '__main__':
 
