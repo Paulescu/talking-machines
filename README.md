@@ -1,15 +1,18 @@
 # Next steps
 
 - [x] Save model checkpoints during training.
-- [ ] Get a decent model.
+- [x] Save checkpoints to gdrive, not to the instance.
+- [x] Load model from checkpoint.
 
-- [ ] Load model from checkpoint.
+- [ ] Get a decent model.
 - [ ] Implement beam-search decoding.
 
+Attention:
 - [ ] Add Luong's attention
-- [ ] Save checkpoints to gdrive, not to the instance.
 
+Transformer:
 - [ ] Start transformer based chatbot.
+
 - [ ] Memory network to attend over personality?
 
 # Setup
