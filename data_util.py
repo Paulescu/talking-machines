@@ -22,13 +22,15 @@ from torchtext.data.utils import interleave_keys
 from autocorrect import Speller
 from tqdm.auto import tqdm
 
+spacy_en = spacy.load('en_core_web_sm')
+
 DATA_DIR = './data'
 
 # 
 # Data pre-processing, from raw dataset to train, validation, test sets
 #
 
-def generate_train_validation_test_files(autocorrect=False) -> Tuple[str, str, str]:
+def generate_train_validation_test_files(autocorrect=False):
     """Generates train, validation, and test conversations from the
     raw data files.
     """
@@ -48,25 +50,20 @@ def generate_train_validation_test_files(autocorrect=False) -> Tuple[str, str, s
     )
     print(f'Test set {len(test_pairs):,}')
 
-    # save sentences pairs into separate train, validation and test CSV files
-    suffix = '_autocorrect' if autocorrect else ''
-    train_csv = f'train{suffix}.csv'
-    val_csv = f'val{suffix}.csv'
-    test_csv = f'test{suffix}.csv'
+    # save sentence pairs into train, validation and test CSV files
     pd.DataFrame(train_pairs[:-10000]).to_csv(
-        os.path.join(DATA_DIR, train_csv),
+        os.path.join(DATA_DIR, 'train.csv'),
         index=False,
         header=False)
     pd.DataFrame(train_pairs[-10000:]).to_csv(
-        os.path.join(DATA_DIR, val_csv),
+        os.path.join(DATA_DIR, 'val.csv'),
         index=False,
         header=False)
     pd.DataFrame(test_pairs).to_csv(
-        os.path.join(DATA_DIR, test_csv),
+        os.path.join(DATA_DIR, 'test.csv'),
         index=False,
         header=False)
-    
-    return train_csv, val_csv, test_csv
+
 
 def load_raw_data() -> Tuple[List, List]:
     """Returns training data and test data
@@ -122,15 +119,19 @@ EOS_TOKEN = "</s>"
 PAD_TOKEN = "<pad>"
 
 class TrainingDataWrapper:   
-    
+    """
+    Encapsulates functionality to generate PyTorch datasets and dataloaders
+    at training time
+    """
+
     def __init__(self):
 
         self.vocab = None
         self.embeddings = None
 
     def get_datasets(self,
-                     train_csv, val_csv, test_csv,
-                     train_size, val_size,
+                     train_size: int,
+                     val_size: int,
                      use_glove=False) -> Tuple[Dataset, Dataset, Dataset]:
         """
         Load and return train, validation, test sets with tokenized and
@@ -141,14 +142,14 @@ class TrainingDataWrapper:
         """
 
         # generate a temporal smaller version of the train set
-        original_file = os.path.join(DATA_DIR, train_csv)
+        original_file = os.path.join(DATA_DIR, 'train.csv')
         new_train_file = os.path.join(DATA_DIR, f'train_{train_size}.csv')
         pd.read_csv(original_file, header=None). \
             head(train_size). \
             to_csv(new_train_file, index=False, header=None)
 
         # generate a temporal smaller version of the validation set
-        original_file = os.path.join(DATA_DIR, val_csv)
+        original_file = os.path.join(DATA_DIR, 'val.csv')
         new_validation_file = os.path.join(DATA_DIR, f'val_{val_size}.csv')
         pd.read_csv(original_file, header=None) \
             .head(val_size) \

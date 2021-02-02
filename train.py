@@ -15,9 +15,8 @@ from torch.optim import Adam
 from util import (
     count_trainable_parameters,
     get_random_id,
-    download_artifacts
+    get_dataset_size
 )
-from data_util import get_dataset_size
 
 def cross_entropy_loss_fn(pad_token_id = None):
     """Returns a cross-entropy loss function that ignores positions with
