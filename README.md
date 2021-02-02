@@ -3,10 +3,12 @@
 - [x] Save model checkpoints during training.
 - [ ] Get a decent model.
 - [ ] Load model from checkpoint.
-- [ ] Allow inference.
-- [ ] Implement dynamic chat.
 - [ ] Implement beam-search decoding.
-- [ ] Fine-tune hyperparameters
+- [ ] Add Luong's attention
+- [ ] Save checkpoints to gdrive, not to the instance.
+
+- [ ] Start transformer based chatbot.
+- [ ] Memory network to attend over personality?
 
 # Setup
 
@@ -16,6 +18,21 @@ $ python -m spacy download en_core_web_sm
 
 ```
 $ conda env export > environment.yml
+```
+
+```
+from data_util import DataWrapper
+
+# Dataset objects
+dw = DataWrapper()
+train_ds, val_ds, test_ds = dw.get_datasets(
+    train_size=132000,
+    val_size=7801,  # 7801
+    use_glove=True
+)
+print(f'Train set size: {len(train_ds):,}')
+print(f'Validation set size: {len(val_ds):,}')
+print('Vocab size: ', dw.vocab_size)
 ```
 
 # Theory

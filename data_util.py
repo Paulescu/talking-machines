@@ -2,8 +2,11 @@ import json
 import os
 from typing import (
     Tuple,
-    List
+    List,
+    Union
 )
+from pathlib import Path
+import pickle
 
 import pandas as pd
 import spacy
@@ -83,25 +86,47 @@ def build_sentence_pairs_from_raw_data(conversations, autocorrect=False):
 #
 # Data loading
 #
+
 spacy_en = spacy.load('en_core_web_sm')
+def tokenizer_fn(text):
+    return [tok.text for tok in spacy_en.tokenizer(text)]
 
-class DataWrapper:
-    BOS_TOKEN = "<s>"
-    EOS_TOKEN = "</s>"
-    PAD_TOKEN = "<pad>"
 
-    @staticmethod
-    def tokenizer_fn(text):
-        return [tok.text for tok in spacy_en.tokenizer(text)]
+BOS_TOKEN = "<s>"
+EOS_TOKEN = "</s>"
+PAD_TOKEN = "<pad>"
 
-    @property
-    def vocab_size(self):
-        return len(self.vocab)
+from torchtext.vocab import Vocab
+def preprocess_sentence(self, sentence: str, vocab: Vocab):
+    """
+    
+    """
+    # lowercase sentence
+    sentence = sentence.lower()
 
-    @property
-    def embedding_dim(self):
-        return self.vocab.vectors.shape[1]
+    # tokenize
+    tokens = self.tokenizer_fn(sentence)
 
+    # numericalize
+    output = [BOS_TOKEN]
+    output += [self.vocab.stoi[t] for t in tokens]
+    output += [EOS_TOKEN]
+
+    return output
+
+def save_vocab(vocab: Vocab, path: Union[str, Path]):
+    """Saves vocab to disk"""
+    with open(path, "wb") as f:
+        pickle.dump(vocab, f)
+
+def load_vocab(path: Union[str, Path]):
+    """Loads vocab from disk and returns it"""
+    with open(path, "rb") as f:
+            return pickle.load(f)
+
+
+class TrainingDataWrapper:   
+    
     def __init__(self):
 
         self.vocab = None
@@ -111,7 +136,14 @@ class DataWrapper:
                      train_size, 
                      val_size,
                      use_glove=False) -> Tuple[Dataset, Dataset, Dataset]:
-        
+        """
+        Load and return train, validation, test sets with tokenized and
+        numericalized inputs.
+
+        By using torchtext APIs: Field(), TabularDataset.split() we avoid
+        writing a lot of boilerplate code.
+        """
+
         # generate a temporal smaller version of the train set
         original_file = os.path.join(DATA_DIR, 'train.csv')
         new_train_file = os.path.join(DATA_DIR, f'train_{train_size}.csv')
@@ -126,17 +158,22 @@ class DataWrapper:
             .head(val_size) \
             .to_csv(new_validation_file, index=False, header=None)
 
+        # we tell torchtext we want to lowercase text and tokenize it using
+        # the given 'tokenizer_fn'
         sentence_processor = Field(
-            tokenize=self.tokenizer_fn,
-            init_token=self.BOS_TOKEN,
-            eos_token=self.EOS_TOKEN,
-            pad_token=self.PAD_TOKEN,
+            tokenize=tokenizer_fn,
+            init_token=BOS_TOKEN,
+            eos_token=EOS_TOKEN,
+            pad_token=PAD_TOKEN,
             batch_first=True,
             include_lengths=True,
             lower=True,
         )
         fields = [('src', sentence_processor), ('tgt', sentence_processor)]
 
+        # we tell torchtext the files in disk to look for, and how the text
+        # data is organized in these files.
+        # In this case, each file has 2 columns 'src' and 'tgt' 
         train, validation, test = TabularDataset.splits(
             path='',
             train=new_train_file,
@@ -158,6 +195,8 @@ class DataWrapper:
             # new vocabulary from scratch
             sentence_processor.build_vocab(train, min_freq=3)
         
+        # store the vocabulary, very important! We need to use the same
+        # at inference time.
         self.vocab = sentence_processor.vocab
         
         # delete temporary files generated at the start of this function
@@ -217,12 +256,20 @@ class DataWrapper:
         return train_iter, validation_iter, test_iter
 
     @property
+    def vocab_size(self):
+        return len(self.vocab)
+
+    @property
+    def embedding_dim(self):
+        return self.vocab.vectors.shape[1]
+
+    @property
     def pad_token_id(self):
         """Returns the integer representation of the PAD_TOKEN"""
-        return self.vocab.stoi[self.PAD_TOKEN]
+        return self.vocab.stoi[PAD_TOKEN]
 
-    def tokenStr2Int(self, token_str):
-        return self.vocab.stoi[token_str]
+    # def tokenStr2Int(self, token_str):
+    #     return self.vocab.stoi[token_str]
 
 def get_dataset_size(dataloader):
     """Returns size of the underlying data behind the 'dataloader'"""

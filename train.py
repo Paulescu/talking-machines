@@ -60,27 +60,28 @@ class Seq2seqRNNTrainer:
             self.checkpoint_dir = Path(checkpoint_dir)
         else:
             self.checkpoint_dir = checkpoint_dir
-        is not self.checkpoint_dir.exists():
+        if not self.checkpoint_dir.exists():
             os.mkdir(self.checkpoint_dir)
 
         self.run_id = get_random_id()
 
     def train(self, n_epochs):
+
         for epoch in range(n_epochs):
             train_loss, train_ppl = self._train_iteration(epoch)
             test_loss, test_ppl = self._test_iteration(epoch)
 
-            # print metrics to console            
+            # print metrics to console
             log = 'Epoch: {:03d}, Train loss: {:.4f}, Val loss: {:.4f}, Train ppl: {:.1f}, Val ppl: {:.1f}'
             print(log.format(epoch, train_loss, test_loss, train_ppl, test_ppl))
 
-            # update internal variable
-            self.n_epochs += 1
-
-            # save checkpoint if test loss improves
+            # save checkpoint if test loss is lower than self.min_test_loss
             if test_loss < self.min_test_loss:
                 self.min_test_loss = test_loss
                 self.save_checkpoint()
+
+            # update internal variable
+            self.n_epochs += 1
 
     def _train_iteration(self, epoch):
         return self._iteration(epoch, self.train_dataloader, self.train_size)
@@ -91,6 +92,7 @@ class Seq2seqRNNTrainer:
                                    train=False)
 
     def _iteration(self, epoch, dataloader, dataset_size, train=True):
+        
         if train:
             self.model.train()
         else:
@@ -136,9 +138,9 @@ class Seq2seqRNNTrainer:
         state = {
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'epoch': self.n_epochs,
-            'loss': self.min_test_loss,
-            'perplexity': self.min_test_perplexity,
+            'n_epochs': self.n_epochs,
+            'min_test_loss': self.min_test_loss,
+            'min_test_perplexity': self.min_test_perplexity,
         }
         dir = self.checkpoint_dir / f'{self.run_id}'
         if not dir.exists():
@@ -153,13 +155,6 @@ class Seq2seqRNNTrainer:
             json.dump(self.model.hyperparams, f)
         print(f'{json_file} file was saved')
 
-        # download it if running in Colab
-        # download_artifacts(name=self.run_id, files=[file, json_file])
-        try:
-            download_artifacts(name=self.run_id, files=[file, json_file])
-        except:
-            pass
-
     def load_checkpoint(self, run_id, epoch=None):
         
         checkpoint_dir = self.checkpoint_dir / run_id
@@ -167,17 +162,18 @@ class Seq2seqRNNTrainer:
             checkpoint_file = checkpoint_dir / f'{epoch}.ckpt'
         else:
             # load latest checkpoint
+            raise Exception('Not implemented')
             checkpoint_file = get_latest_checkpoint_file(checkpoint_dir)
         
         # set state
         state = torch.load(checkpoint_file)
         self.model.load_state_dict(state['model_state_dict'])
+        self.model.to(self.device)
         self.optimizer.load_state_dict(state['optimizer_state_dict'])
         self.n_epochs = int(state['n_epochs'])
-        self.min_test_loss = float(state['loss'])
-        self.min_test_perplexity = float(state['perplexity'])
-        self.run_id = run_id     
-
+        self.min_test_loss = float(state['min_test_loss'])
+        self.min_test_perplexity = float(state['min_test_perplexity'])
+        self.run_id = run_id
 
 
 if __name__ == '__main__':
