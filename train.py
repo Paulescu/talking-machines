@@ -65,11 +65,11 @@ class Seq2seqRNNTrainer:
 
         self.run_id = get_random_id()
 
-    def train(self, n_epochs):
+    def train_test_loop(self, n_epochs):
 
         for epoch in range(n_epochs):
-            train_loss, train_ppl = self._train_iteration(epoch)
-            test_loss, test_ppl = self._test_iteration(epoch)
+            train_loss, train_ppl = self.train(epoch)
+            test_loss, test_ppl = self.test(epoch)
 
             # print metrics to console
             log = 'Epoch: {:03d}, Train loss: {:.4f}, Val loss: {:.4f}, Train ppl: {:.1f}, Val ppl: {:.1f}'
@@ -78,20 +78,20 @@ class Seq2seqRNNTrainer:
             # save checkpoint if test loss is lower than self.min_test_loss
             if test_loss < self.min_test_loss:
                 self.min_test_loss = test_loss
-                self.save_checkpoint()
+                self.save()
 
             # update internal variable
             self.n_epochs += 1
 
-    def _train_iteration(self, epoch):
-        return self._iteration(epoch, self.train_dataloader, self.train_size)
+    def train(self, epoch):
+        return self.iteration(epoch, self.train_dataloader, self.train_size)
     
-    def _test_iteration(self, epoch):
+    def test(self, epoch):
         with torch.no_grad():
-            return self._iteration(epoch, self.val_dataloader, self.val_size,
-                                   train=False)
+            return self.iteration(epoch, self.val_dataloader, self.val_size,
+                                  train=False)
 
-    def _iteration(self, epoch, dataloader, dataset_size, train=True):
+    def iteration(self, epoch, dataloader, dataset_size, train=True):
         
         if train:
             self.model.train()
@@ -132,7 +132,7 @@ class Seq2seqRNNTrainer:
         perplexity = math.exp(epoch_loss)
         return epoch_loss, perplexity
 
-    def save_checkpoint(self):
+    def save(self):
         
         # save trainer state
         state = {
@@ -155,7 +155,7 @@ class Seq2seqRNNTrainer:
             json.dump(self.model.hyperparams, f)
         print(f'{json_file} file was saved')
 
-    def load_checkpoint(self, run_id, epoch=None):
+    def load(self, run_id, epoch=None):
         
         checkpoint_dir = self.checkpoint_dir / run_id
         if epoch:

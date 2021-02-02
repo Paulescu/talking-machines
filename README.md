@@ -2,8 +2,10 @@
 
 - [x] Save model checkpoints during training.
 - [ ] Get a decent model.
+
 - [ ] Load model from checkpoint.
 - [ ] Implement beam-search decoding.
+
 - [ ] Add Luong's attention
 - [ ] Save checkpoints to gdrive, not to the instance.
 

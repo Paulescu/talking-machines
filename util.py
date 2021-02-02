@@ -5,6 +5,11 @@ import uuid
 def get_random_id():
     return str(uuid.uuid1())
 
+def get_dataset_size(dataloader):
+    """Returns size of the underlying data behind the 'dataloader'"""
+    batch = next(iter(dataloader))
+    return len(batch.dataset)
+
 from pathlib import Path
 from typing import List, Union
 import tarfile
