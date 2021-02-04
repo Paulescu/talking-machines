@@ -49,6 +49,7 @@ Transformer:
 
 - [ ] Memory network to attend over personality?
 
+
 # References
 
 - [From RNNs to Transformers](https://dzone.com/articles/rnn-seq2seq-transformers-introduction-to-neural-ar)

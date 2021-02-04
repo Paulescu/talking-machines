@@ -7,26 +7,23 @@ from typing import (
 )
 from pathlib import Path
 import pickle
+import pdb
 
 import pandas as pd
 import spacy
 import torch
-# from torch.utils.data import (
-#     Dataset,
-#     DataLoader
-# )
 from torchtext.data import (
     Field,
     Dataset,
     TabularDataset,
     BucketIterator
 )
-from torchtext.data.utils import get_tokenizer
+# from torchtext.data.utils import get_tokenizer
 from torchtext.data.utils import interleave_keys
 from autocorrect import Speller
 from tqdm.auto import tqdm
 
-from .vocab import WordVocab
+# from .vocab import WordVocab
 from .tokenizer import tokenizer
 from .constants import *
 
@@ -92,12 +89,10 @@ def build_sentence_pairs_from_raw_data(conversations, autocorrect=False):
         for utterance in conversation['utterances']:
             next_utterance = utterance['candidates'][-1]
             
-            # if utterance['history'][0] == '__ SILENCE __':
-            #     # import pdb
-            #     # pdb.set_trace()
-            #     history = '.'.join(utterance['history'][1:])
-            # else:
-            history = '.'.join(utterance['history'])
+            if utterance['history'][0] == '__ SILENCE __':
+                history = '.'.join(utterance['history'][1:])
+            else:
+                history = '.'.join(utterance['history'])
 
             # if not history:
             #     continue
@@ -111,76 +106,90 @@ def build_sentence_pairs_from_raw_data(conversations, autocorrect=False):
     print(f'{removed:,} lines removed')
     return pairs
 
-# spacy_en = spacy.load('en_core_web_sm')
-# def tokenizer_fn(text):
-#     return [tok.text for tok in spacy_en.tokenizer(text)]
 
-def get_datasets(vocab: WordVocab,
-                 train_size: int = None,
-                 val_size: int = None) -> Tuple[Dataset, Dataset, Dataset]:
+def get_datasets_and_vocab(
+    path_to_files,
+    train,
+    validation,
+    test,
+    train_size: int = None,
+    validation_size: int = None,
+    use_glove: bool = True,
+) -> Tuple[Dataset, Dataset, Dataset]:
     """
-    Load and return PyTorch Datasets train, validation, test sets with tokenized
-    and numericalized inputs.
+    Load and return PyTorch Datasets train, validation, test sets.
 
     By using torchtext APIs: Field(), TabularDataset.split() we avoid
     writing a lot of boilerplate code.
     """
+    train_path = os.path.join(path_to_files, train)
+    validation_path = os.path.join(path_to_files, validation)
+    test_path = os.path.join(path_to_files, test)
+
     if train_size:
         # generate a temporal smaller version of the train set
-        new_train_file = os.path.join(DATA_DIR, f'train_{train_size}.csv')
-        pd.read_csv(
-            os.path.join(DATA_DIR, 'train.csv'),
-            header=None
-        ).head(train_size).to_csv(new_train_file, index=False, header=None)
-
-    if val_size:
+        new_train_path = os.path.join(path_to_files, f'train_{train_size}.csv')
+        pd.read_csv(train_path, header=None) \
+            .head(train_size) \
+            .to_csv(new_train_path, index=False, header=None)
+        train_path = new_train_path
+    
+    if validation_size:
         # generate a temporal smaller version of the validation set
-        new_validation_file = os.path.join(DATA_DIR, f'val_{val_size}.csv')
-        pd.read_csv(
-            os.path.join(DATA_DIR, 'val.csv'),
-            header=None
-        ).head(val_size).to_csv(new_validation_file, index=False, header=None)
+        new_validation_path = os.path.join(path_to_files, f'validation_{validation_size}.csv')
+        pd.read_csv(validation_path, header=None) \
+            .head(validation_size) \
+            .to_csv(new_validation_path, index=False, header=None)
+        validation_path = new_validation_path
 
     # we tell torchtext we want to lowercase text and tokenize it using
     # the given 'tokenizer_fn'
-    tokenizer = get_tokenizer('basic_english', language='en')
+    # tokenizer = get_tokenizer('basic_english', language='en')
     sentence_processor = Field(
         tokenize=tokenizer,
         init_token=BOS_TOKEN,
         eos_token=EOS_TOKEN,
         pad_token=PAD_TOKEN,
-        unk_token=UNK_TOKEN,
+        # unk_token=UNK_TOKEN,
         batch_first=True,
         include_lengths=True,
         lower=True,
     )
     fields = [('src', sentence_processor), ('tgt', sentence_processor)]
 
-    # assign the previously constructed torchtext.vocab.Vocab
-    sentence_processor.vocab = vocab
-
     # we tell torchtext the files in disk to look for, and how the text
     # data is organized in these files.
     # In this case, each file has 2 columns 'src' and 'tgt' 
-    train, val, test = TabularDataset.splits(
+    train_dataset, validation_dataset, test_dataset = TabularDataset.splits(
         path='',
-        train=new_train_file,
-        validation=new_validation_file,
-        test=os.path.join(DATA_DIR, 'test.csv'),
+        train=train_path,
+        validation=validation_path,
+        test=test_path,
         format='csv',
         skip_header=False,
         fields=fields,
     )
+
+        # assign the previously constructed torchtext.vocab.Vocab
+    # sentence_processor.vocab = vocab
+    if use_glove:
+        # vocabulary from GloVe
+        sentence_processor.build_vocab(train_dataset,
+                                       min_freq=3,
+                                       vectors='glove.6B.100d')
+    else:
+        # new vocabulary from scratch
+        sentence_processor.build_vocab(train_dataset, min_freq=3)
     
     if train_size:
         # delete temporary file
-        os.remove(new_train_file)
+        os.remove(train_path)
     
-    if val_size:
+    if validation_size:
         # delete temporary file
-        os.remove(new_validation_file)
+        os.remove(validation_path)
 
-    return train, val, test
+    return train_dataset, validation_dataset, test_dataset, sentence_processor.vocab
 
 def get_dataloaders(
     train_dataset: Dataset,
@@ -225,24 +234,16 @@ def get_dataloaders(
 
         return max(num_of_tokens_in_src_tensor, num_of_tokens_in_tgt_tensor)
 
-    train_iter = BucketIterator(
-        train_dataset,
+    train_iter, val_iter, test_iter = BucketIterator.splits(
+        (train_dataset, val_dataset, test_dataset),
         batch_size=batch_size,
         device=device,
         sort_key=sort_key,
         sort_within_batch=True,
         batch_size_fn=batch_size_fn,
-        train=True
     )
 
-    val_iter, test_iter = BucketIterator.splits(
-        (val_dataset, test_dataset),
-        batch_size=batch_size,
-        device=device,
-        sort_key=sort_key,
-        sort_within_batch=True,
-        batch_size_fn=batch_size_fn,
-    )
+    # pdb.set_trace()
 
     return train_iter, val_iter, test_iter
 
@@ -264,3 +265,5 @@ def preprocess_sentence(self, sentence: str, vocab: Vocab):
     output += [EOS_TOKEN]
 
     return output
+
+
