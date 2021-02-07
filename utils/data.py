@@ -34,13 +34,13 @@ PAD_TOKEN = "<PAD>"
 UNK_TOKEN = "<UNK>"
 
 
-def generate_train_validation_test_files(autocorrect=False):
+def generate_train_validation_test_files(file: Union[str, Path],
+                                         autocorrect=False):
     """
-    Generates train, validation, and test conversations from the
-    raw data files.
+    Generates 3 CSV files: train, validation, test.
     """
     # load raw data from json file
-    train_data, test_data = load_raw_data()
+    train_data, test_data = load_raw_data(file)
 
     # build sentence pairs (context, next_utterance) from raw data
     train_pairs = build_sentence_pairs_from_raw_data(
@@ -56,26 +56,22 @@ def generate_train_validation_test_files(autocorrect=False):
     print(f'Test set {len(test_pairs):,}')
 
     # save sentence pairs into train, validation and test CSV files
-    pd.DataFrame(train_pairs[:-10000]).to_csv(
-        os.path.join(DATA_DIR, 'train.csv'),
-        index=False,
-        header=False)
-    pd.DataFrame(train_pairs[-10000:]).to_csv(
-        os.path.join(DATA_DIR, 'val.csv'),
-        index=False,
-        header=False)
-    pd.DataFrame(test_pairs).to_csv(
-        os.path.join(DATA_DIR, 'test.csv'),
-        index=False,
-        header=False)
+    # os.path.join(DATA_DIR, 'val.csv'),
+    train_file = Path(file).resolve().parent / 'train.csv'
+    pd.DataFrame(train_pairs[:-10000]).to_csv(train_file, index=False, header=False)
+
+    val_file = Path(file).resolve().parent / 'val.csv'
+    pd.DataFrame(train_pairs[-10000:]).to_csv(val_file, index=False, header=False)
+    
+    test_file = Path(file).resolve().parent / 'test.csv'
+    pd.DataFrame(test_pairs).to_csv(test_file, index=False, header=False)   
 
 
-def load_raw_data() -> Tuple[List, List]:
+def load_raw_data(file: Union[str, Path]) -> Tuple[List, List]:
     """
     Returns training data and test data
     """
-    file_path = os.path.join(DATA_DIR, 'personachat_self_original.json')
-    with open(file_path) as json_file:
+    with open(file) as json_file:
         data = json.load(json_file)
     return data['train'], data['valid']
 

@@ -39,10 +39,13 @@ Check your tokenization.
 - [x] Load model from checkpoint.
 
 - [ ] Get a decent model.
+    * [ ] + attention and context vector
+    * [ ] + feed context vector at next step
+
 - [ ] Implement beam-search decoding.
 
 Attention:
-- [ ] Add Luong's attention
+- [x] Add Luong's attention
 - [-] Tie weights as in (here)[https://github.com/marumalo/pytorch-seq2seq/blob/master/model.py]
 
 
