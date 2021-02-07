@@ -99,6 +99,7 @@ class Seq2seqRNNTrainer:
         
         epoch_loss = 0
         epoch_accuracy = 0
+        teacher_forcing = self.teacher_forcing if train else 0.0
         with tqdm(total=dataset_size) as pbar:
             for batch in dataloader:
                 # forward step
@@ -107,7 +108,8 @@ class Seq2seqRNNTrainer:
                 tgt_output_scores = self.model(
                     src,
                     src_len,
-                    tgt_input, teacher_forcing=self.teacher_forcing
+                    tgt_input,
+                    teacher_forcing=teacher_forcing
                 ).to(self.device)
 
                 # compute batch loss after a bit of reshaping

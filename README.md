@@ -43,6 +43,9 @@ Check your tokenization.
 
 Attention:
 - [ ] Add Luong's attention
+- [-] Tie weights as in (here)[https://github.com/marumalo/pytorch-seq2seq/blob/master/model.py]
+
+
 
 Transformer:
 - [ ] Start transformer based chatbot.

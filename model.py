@@ -3,8 +3,10 @@ import random
 import pdb
 
 import torch
+from torch import Tensor
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+import torch.nn.functional as F
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -20,6 +22,7 @@ class Seq2seqRNN(nn.Module):
                  dropout=0.0,
                  pretrained_embeddings: Optional[torch.Tensor] = None,
                  freeze_embeddings=False,
+                 attention_type: str = None
                  ):
         super(Seq2seqRNN, self).__init__()
 
@@ -56,7 +59,8 @@ class Seq2seqRNN(nn.Module):
                                   vocab_size,
                                   hidden_dim,
                                   n_layers,
-                                  dropout=dropout)
+                                  dropout=dropout,
+                                  attention_type=attention_type)
 
     def forward(self,
                 src,
@@ -68,18 +72,18 @@ class Seq2seqRNN(nn.Module):
         #   hidden_states:              [n_layers, batch_size, hidden_dim]
         #   cell_states:                [n_layers, batch_size, hidden_dim]
         #   last_layer_hidden_states:   [seq_len, batch_size, hidden_dim]
-        hidden_states, cell_states, last_layer_hidden_states = \
+        encoder_outputs, hidden_states, cell_states = \
             self.encoder(src, src_len)
-
-        tgt_output_logits = self.decoder(
+        
+        tgt_output_scores = self.decoder(
             tgt_input,  # it is here because we need it for teacher forcing
             hidden_states,
             cell_states,
-            attention_vectors=last_layer_hidden_states,
-            teacher_forcing=teacher_forcing
+            teacher_forcing=teacher_forcing,
+            encoder_outputs=encoder_outputs,
         )
 
-        return tgt_output_logits
+        return tgt_output_scores
     
     @property
     def hyperparams(self):
@@ -134,44 +138,53 @@ class EncoderRNN(nn.Module):
         """
         embedded = self.dropout(self.embedding(src))
         
-        # we transform the input tensor into a PackedSequence object because
-        # we want the LSTM outputs 'last_step_hidden_state' and
-        # 'last_step_cell_state' to correspond to the last non-padding token in
-        # the input sequence, NOT the last token.
+        # Tensor -> PackedSequence
+        # We do this transformation so that 'hidden_states' and
+        # 'cell_states' below come from the last non-padding token, NOT the
+        # last token in the src sequence. #finesse
         packed_embedded = pack_padded_sequence(embedded,
                                                src_len.cpu(),
                                                batch_first=True,
                                                enforce_sorted=False)
-        
-        last_layer_hidden_states, (hidden_states, cell_states) = \
+        # RNN stuff
+        outputs, (hidden_states, cell_states) = \
             self.rnn(packed_embedded)
 
-        # unpack PackedSequence into a usual torch.Tensor object
-        last_layer_hidden_states, _ = pad_packed_sequence(last_layer_hidden_states)
-
-        # aggregate hidden states across the 'directions' axis.       
+        # PackedSequence -> Tensor
+        #                   [max_src_len, batch_size, n_directions * hidden_dim]
+        outputs, _ = pad_packed_sequence(outputs)
+        
+        # Reshape outputs
+        # [max_src_len, batch_size, n_directions * hidden_dim]
+        # -> [max_src_len, batch_size, hidden_dim]
+        # -> [batch_size, max_src_len, hidden_dim]
+        batch_size, max_src_len = src.shape[:2]
+        outputs = outputs.view(
+            batch_size, max_src_len, self.n_directions, self.hidden_dim
+        ).mean(dim=-2)
+        
+        # Mean-reduce hidden_states, cell_states along 'directions' axis
+        # [n_layers * n_directions, batch_size, hidden_dim]
+        # -> [n_layers, batch_size, hidden_dim]     
         hidden_states = hidden_states.view(
-            self.n_layers, self.n_directions, -1, self.hidden_dim)
-        hidden_states = torch.mean(hidden_states, dim=1, keepdim=False)
-        
-        # aggregate cell states across the 'directions' axis.
+            self.n_layers, self.n_directions, batch_size, self.hidden_dim
+        ).mean(dim=1)       
         cell_states = cell_states.view(
-            self.n_layers, self.n_directions, -1, self.hidden_dim)
-        cell_states = torch.mean(cell_states, dim=1, keepdim=False)
+            self.n_layers, self.n_directions, batch_size, self.hidden_dim
+        ).mean(dim=1)
 
-        return hidden_states, cell_states, last_layer_hidden_states
+        return outputs, hidden_states, cell_states
         
-
 class DecoderRNN(nn.Module):
 
     def __init__(self,
-                 embedding,
-                 embedding_dim,
-                 vocab_size,
-                 hidden_dim,
-                 n_layers,
-                 dropout=0.0,
-                 attention_mechanism=None):
+                 embedding: nn.Module,
+                 embedding_dim: int,
+                 vocab_size: int,
+                 hidden_dim: int,
+                 n_layers: int,
+                 dropout: float = 0.0,
+                 attention_type: str = None):
         super(DecoderRNN, self).__init__()
         self.vocab_size = vocab_size
 
@@ -185,14 +198,18 @@ class DecoderRNN(nn.Module):
                            bidirectional=False)
         self.fc_output = nn.Linear(hidden_dim, vocab_size)
 
-        self.attention_mechanism = attention_mechanism
+        # Luong's attention
+        self.use_attention = attention_type is not None
+        if self.use_attention:
+            self.attention = Attention(hidden_dim, attention_type)
+            self.w = nn.Linear(hidden_dim * 2, hidden_dim)
 
     def forward(self,
-                tgt_input,
-                hidden_state,
-                cell_state,
-                attention_vectors=None,
-                teacher_forcing=0.0):
+                tgt_input: Tensor,
+                hidden_state: Tensor,
+                cell_state: Tensor,
+                teacher_forcing: float = 0.0,
+                encoder_outputs: Tensor = {}):
         """
         Outputs the logits (i.e. a probability distribution) for each word
         in tgt. The output is a Tensor with dimensions
@@ -212,9 +229,10 @@ class DecoderRNN(nn.Module):
         input = tgt_input[:, 0]
 
         for step in range(0, tgt_output_len):
-
+            
             logits, hidden_state, cell_state = \
-                self.decode_step(input, hidden_state, cell_state)
+                self.decode_step(input, hidden_state, cell_state,
+                                 encoder_outputs=encoder_outputs)
 
             # store logits in the output tensor
             tgt_output_logits[:, step, :] = logits
@@ -229,23 +247,105 @@ class DecoderRNN(nn.Module):
             
         return tgt_output_logits
 
-    def decode_step(self, input, hidden_state, cell_state):
+    def decode_step(self, input, hidden_state, cell_state, encoder_outputs):
         """Outputs logits for one target word"""        
         embedded_input = self.dropout(self.embedding(input))
         
-        # we add an extra dimension to the tensor to have the shape
-        # that self.rnn expects, i.e. [batch_size, 1, vocab_size]
+        # Add an extra dimension to the tensor to have the shape
+        # that self.rnn expects
+        # [batch_size, vocab_size] -> [batch_size, 1, vocab_size]
         embedded_input = embedded_input.unsqueeze(1)
 
-        rnn_output, (next_hidden_state, next_cell_state) = \
+        # RNN stuff
+        decoder_output, (next_hidden_state, next_cell_state) = \
             self.rnn(embedded_input, (hidden_state, cell_state))
         
-        logits = self.fc_output(rnn_output)
+        # Attention over encoder_outputs
+        if self.use_attention:
+            # attention weights: [batch_size, max_src_len]
+            attn_weights = self.attention(decoder_output, encoder_outputs) #.transpose(0, 1)
+        
+            # context vector: [batch_size, 1, hidden_dim]
+            context = torch.bmm(
+                attn_weights.unsqueeze(1), # [batch_size, 1, max_src_len]
+                encoder_outputs            # [batch_size, max_src_len, hidden_dim]
+            )
+            
+            # concat 'decoder_output' and 'context': [batch_size, 1, hidden_dim*2]
+            concat = self.w(torch.cat((decoder_output, context), dim=2))
+            
+            # [batch_size, 1, hidden_dim]
+            decoder_output = concat.tanh()
+
+        # [batch_size, 1, vocab_size]
+        logits = self.fc_output(decoder_output)
 
         # we remove the extra dimension we previously added
+        # [batch_size, vocab_size]
         logits = logits.squeeze(1)
 
         return logits, next_hidden_state, next_cell_state
+
+
+class Attention(nn.Module):
+    """
+    Luong's attention
+    https://arxiv.org/pdf/1508.04025.pdf
+
+    Based on
+    https://github.com/marumalo/pytorch-seq2seq/blob/master/model.py
+    https://github.com/bentrevett/pytorch-seq2seq/blob/master/3%20-%20Neural%20Machine%20Translation%20by%20Jointly%20Learning%20to%20Align%20and%20Translate.ipynb
+    """
+    def __init__(self,
+                 hidden_dim: int,
+                 method: str):
+        super(Attention, self).__init__()
+        assert method in {'dot', 'general', 'concat'}, \
+            'method should either be dot, general or concat'
+        
+        # self.attn = nn.Linear((hidden_dim * multiplier) + hidden_dim,
+        #                       hidden_dim)
+        # self.v = nn.Linear(hidden_dim, 1, bias=False)
+
+        self.method = method
+        self.hidden_dim = hidden_dim
+
+        # dot score_function does not require extra parameters.
+        # TODO: add nn.Parameter's for the other two scoring_function: concat, general  
+
+    def dot(self, decoder_hidden, encoder_outputs):
+        """
+        Input tensors:
+            decoder_hidden shape    -> [batch_size, 1, hidden_dim]
+            encoder_outputs shape   -> [batch_size, src_len, hidden_dim]
+        
+            Thanks to broadcasting we can do element-wise multiplication
+            between the 2 input tensors without copying 'decoder_hidden'
+            'src_len' times along dim=1 to match 'encoder_outputs'. :-)
+        
+        Output tensor:
+            attn_weights shape      -> [batch_size, src_len]
+        """
+        # print(encoder_outputs.shape)
+        # print(decoder_hidden.shape)
+        attn_weights = torch.sum(decoder_hidden * encoder_outputs, dim=2)
+
+        # also can be written as
+        # attn_weights = decoder_hidden.dot(encoder_outputs)
+        
+        return attn_weights
+
+    def forward(self,
+                decoder_hidden: Tensor, # [batch_size, 1, hidden_dim]
+                encoder_outputs: Tensor # [batch_size, src_len, hidden_dim]
+        ) -> Tensor:
+        # print(encoder_outputs.shape)
+        if self.method == 'dot':
+            attn_energies = self.dot(decoder_hidden, encoder_outputs)
+        else:
+            raise Error("Not implemented")
+        
+        return F.softmax(attn_energies, dim=1)
 
 if __name__ == '__main__':
 

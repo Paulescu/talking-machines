@@ -25,9 +25,13 @@ from tqdm.auto import tqdm
 
 # from .vocab import WordVocab
 from .tokenizer import tokenizer
-from .constants import *
+# from .constants import *
 
-# spacy_en = spacy.load('en_core_web_sm')
+# special tokens
+BOS_TOKEN = "<BOS>"
+EOS_TOKEN = "<EOS>"
+PAD_TOKEN = "<PAD>"
+UNK_TOKEN = "<UNK>"
 
 
 def generate_train_validation_test_files(autocorrect=False):
