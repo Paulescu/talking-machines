@@ -22,8 +22,7 @@ class Seq2seqRNN(nn.Module):
                  dropout=0.0,
                  pretrained_embeddings: Optional[torch.Tensor] = None,
                  freeze_embeddings=False,
-                 attention_type: str = None
-                 ):
+                 attention_type: str = None):
         super(Seq2seqRNN, self).__init__()
 
         self.vocab_size = vocab_size
@@ -31,7 +30,7 @@ class Seq2seqRNN(nn.Module):
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
         self.n_directions_encoder = n_directions_encoder
-
+        
         # We use the same embedding layer in the encoder and in the decoder.
         # We let the user choose between using pre-trained GloVe embeddings or
         # learning from scratch 
@@ -66,25 +65,58 @@ class Seq2seqRNN(nn.Module):
                 src,
                 src_len,
                 tgt_input,
-                teacher_forcing=0.0):
+                teacher_forcing=0.0) -> Tensor:
+        #
+        # Forward pass through the Encoder
+        #
 
-        # Dimensions of the output tensors
-        #   hidden_states:              [n_layers, batch_size, hidden_dim]
-        #   cell_states:                [n_layers, batch_size, hidden_dim]
-        #   last_layer_hidden_states:   [seq_len, batch_size, hidden_dim]
-        encoder_outputs, hidden_states, cell_states = \
-            self.encoder(src, src_len)
+        #   encoder_outputs:    [batch_size, max_src_len, hidden_dim]
+        #   hidden_state:       [batch_size, n_layers, hidden_dim]
+        #   cell_state:         [batch_size, n_layers, hidden_dim]
+        encoder_outputs, hidden_state, cell_state = self.encoder(src, src_len)
+
+        #
+        # Forward pass through the decoder
+        #
+
+        # Allocate memory to store the output tensor
+        batch_size, tgt_input_len = tgt_input.shape
+        tgt_output_len = tgt_input_len - 1 # we do not need to predict the 1st token of tgt
+        tgt_output_scores = torch.zeros(
+            batch_size, tgt_output_len, self.vocab_size)
         
-        tgt_output_scores = self.decoder(
-            tgt_input,  # it is here because we need it for teacher forcing
-            hidden_states,
-            cell_states,
-            teacher_forcing=teacher_forcing,
-            encoder_outputs=encoder_outputs,
-        )
+        # <BOS> token is always the 1st token
+        decoder_input = tgt_input[:, 0]
 
+        # iterate over target sequence
+        for step in range(0, tgt_output_len):
+            
+            # decode current step
+            scores, hidden_state, cell_state = self.decoder(
+                decoder_input,
+                hidden_state,
+                cell_state,
+                encoder_outputs=encoder_outputs
+            )
+
+            # store scores in the output tensor
+            tgt_output_scores[:, step, :] = scores
+
+            # we use teacher forcing, with probability 'teacher_forcing', to
+            # decide if the next tgt_step is the correct one, or the one
+            # the model assigns the highest score to.
+            if random.random() < teacher_forcing:
+                decoder_input = tgt_input[:, step + 1]
+            else:
+                decoder_input = scores.argmax(1)
+            
         return tgt_output_scores
     
+    def beam_search_decode(self,
+                           ):
+        """Beam-search decoding to use at inference time"""
+        pass
+
     @property
     def hyperparams(self):
         return {
@@ -204,51 +236,57 @@ class DecoderRNN(nn.Module):
             self.attention = Attention(hidden_dim, attention_type)
             self.w = nn.Linear(hidden_dim * 2, hidden_dim)
 
+    # def forward(self,
+    #             tgt_input: Tensor,
+    #             hidden_state: Tensor,
+    #             cell_state: Tensor,
+    #             teacher_forcing: float = 0.0,
+    #             encoder_outputs: Tensor = {}):
+    #     """
+    #     Outputs the logits (i.e. a probability distribution) for each word
+    #     in tgt. The output is a Tensor with dimensions
+    #     [batch_size, tgt_len, vocab_size].
+    #     """
+    #     # define shape of the output tensor
+    #     batch_size, tgt_input_len = tgt_input.shape
+        
+    #     # as we do not predict the first token in tgt_input <BOS>,
+    #     # the tgt_output has length equal to tgt_input - 1
+    #     tgt_output_len = tgt_input_len - 1
+    #     tgt_output_logits = torch.zeros(batch_size,
+    #                                     tgt_output_len,
+    #                                     self.vocab_size)
+        
+    #     # tgt_input[:, 0] is the <BOS> token
+    #     input = tgt_input[:, 0]
+
+    #     for step in range(0, tgt_output_len):
+            
+    #         logits, hidden_state, cell_state = \
+    #             self.decode_step(input, hidden_state, cell_state,
+    #                              encoder_outputs=encoder_outputs)
+
+    #         # store logits in the output tensor
+    #         tgt_output_logits[:, step, :] = logits
+
+    #         # we use teacher forcing, with probability 'teacher_forcing', to
+    #         # decide if the next tgt_step is the correct one, or the one
+    #         # the model assigns the highest probability (logit) to.
+    #         if random.random() < teacher_forcing:
+    #             input = tgt_input[:, step + 1]
+    #         else:
+    #             input = logits.argmax(1)
+            
+    #     return tgt_output_logits
+
     def forward(self,
-                tgt_input: Tensor,
-                hidden_state: Tensor,
-                cell_state: Tensor,
-                teacher_forcing: float = 0.0,
-                encoder_outputs: Tensor = {}):
+                input,
+                hidden_state,
+                cell_state,
+                encoder_outputs = {}):
         """
-        Outputs the logits (i.e. a probability distribution) for each word
-        in tgt. The output is a Tensor with dimensions
-        [batch_size, tgt_len, vocab_size].
+        Decodes one tgt word, NOT the whole tgt sentence.
         """
-        # define shape of the output tensor
-        batch_size, tgt_input_len = tgt_input.shape
-        
-        # as we do not predict the first token in tgt_input <BOS>,
-        # the tgt_output has length equal to tgt_input - 1
-        tgt_output_len = tgt_input_len - 1
-        tgt_output_logits = torch.zeros(batch_size,
-                                        tgt_output_len,
-                                        self.vocab_size)
-        
-        # tgt_input[:, 0] is the <BOS> token
-        input = tgt_input[:, 0]
-
-        for step in range(0, tgt_output_len):
-            
-            logits, hidden_state, cell_state = \
-                self.decode_step(input, hidden_state, cell_state,
-                                 encoder_outputs=encoder_outputs)
-
-            # store logits in the output tensor
-            tgt_output_logits[:, step, :] = logits
-
-            # we use teacher forcing, with probability 'teacher_forcing', to
-            # decide if the next tgt_step is the correct one, or the one
-            # the model assigns the highest probability (logit) to.
-            if random.random() < teacher_forcing:
-                input = tgt_input[:, step + 1]
-            else:
-                input = logits.argmax(1)
-            
-        return tgt_output_logits
-
-    def decode_step(self, input, hidden_state, cell_state, encoder_outputs):
-        """Outputs logits for one target word"""        
         embedded_input = self.dropout(self.embedding(input))
         
         # Add an extra dimension to the tensor to have the shape
@@ -278,13 +316,13 @@ class DecoderRNN(nn.Module):
             decoder_output = concat.tanh()
 
         # [batch_size, 1, vocab_size]
-        logits = self.fc_output(decoder_output)
+        scores = self.fc_output(decoder_output)
 
         # we remove the extra dimension we previously added
         # [batch_size, vocab_size]
-        logits = logits.squeeze(1)
+        scores = scores.squeeze(1)
 
-        return logits, next_hidden_state, next_cell_state
+        return scores, next_hidden_state, next_cell_state
 
 
 class Attention(nn.Module):

@@ -122,7 +122,7 @@ class Seq2seqRNNTrainer:
                     # backward step
                     self.optimizer.zero_grad()
                     loss.backward()
-                    # torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clip)
                     self.optimizer.step()
 
                 epoch_loss += batch.batch_size * loss.item()
