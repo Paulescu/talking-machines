@@ -38,7 +38,11 @@ Check your tokenization.
 - [x] Save checkpoints to gdrive, not to the instance.
 - [x] Load model from checkpoint.
 
+Tricks & learnings:
+- [ ] Triple check the vocabulary you generated from the corpus.
 - [ ] Switch on gradient clipping.
+- [ ] Reduce LR on plateau (see [Reduce learning rate on plateau](https://github.com/marumalo/pytorch-seq2seq/blob/master/train.py))
+
 - [ ] Get a decent model.
     * [ ] + attention and context vector
     * [ ] + feed context vector at next step
@@ -48,7 +52,6 @@ Check your tokenization.
 Attention:
 - [x] Add Luong's attention
 - [-] Tie weights as in (here)[https://github.com/marumalo/pytorch-seq2seq/blob/master/model.py]
-
 
 
 Transformer:
@@ -71,3 +74,5 @@ https://charon.me/posts/pytorch/pytorch_seq2seq_4/
 - [Tricks to normalize text before tokenization](https://pytorch.org/text/_modules/torchtext/data/utils.html)
 
 - [How to build vocab, datasets and dataloaders with torchtext](https://pytorch.org/tutorials/beginner/torchtext_translation_tutorial.html)
+
+- [Reduce learning rate on plateau](https://github.com/marumalo/pytorch-seq2seq/blob/master/train.py)
