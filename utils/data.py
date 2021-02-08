@@ -1,4 +1,5 @@
 import json
+import sys
 import os
 from typing import (
     Tuple,
@@ -7,6 +8,7 @@ from typing import (
 )
 from pathlib import Path
 import pickle
+import wget
 import pdb
 
 import pandas as pd
@@ -34,48 +36,59 @@ PAD_TOKEN = "<PAD>"
 UNK_TOKEN = "<UNK>"
 
 
-def generate_train_validation_test_files(file: Union[str, Path],
-                                         autocorrect=False):
+def download_data(destination_dir):
     """
-    Generates 3 CSV files: train, validation, test.
+    Downloads the initial dataset from remote URL
     """
-    # load raw data from json file
-    train_data, test_data = load_raw_data(file)
+    def bar_progress(current, total, width=80):
+        """Auxiliary function to print progress bar while downloading"""
+        progress_message = "Downloading: %d%% [%d / %d] bytes" % (current / total * 100, current, total)
+        # Don't use print() as it will print in new line every time.
+        sys.stdout.write("\r" + progress_message)
+        sys.stdout.flush()
 
-    # build sentence pairs (context, next_utterance) from raw data
-    train_pairs = build_sentence_pairs_from_raw_data(
-        train_data,
-        autocorrect=autocorrect
-    )
-    print(f'Train set {len(train_pairs):,}')
-    
-    test_pairs = build_sentence_pairs_from_raw_data(
-        test_data,
-        autocorrect=autocorrect
-    )
-    print(f'Test set {len(test_pairs):,}')
+    url = 'https://s3.amazonaws.com/datasets.huggingface.co/personachat/personachat_self_original.json'
+    destination_file = str(Path(destination_dir) / 'personachat_self_original.json')
+    wget.download(url, destination_file, bar=bar_progress)
 
-    # save sentence pairs into train, validation and test CSV files
-    # os.path.join(DATA_DIR, 'val.csv'),
-    train_file = Path(file).resolve().parent / 'train.csv'
-    pd.DataFrame(train_pairs[:-10000]).to_csv(train_file, index=False, header=False)
-    print(f'Saved {train_file}')
-
-    val_file = Path(file).resolve().parent / 'val.csv'
-    pd.DataFrame(train_pairs[-10000:]).to_csv(val_file, index=False, header=False)
-    print(f'Saved {val_file}')
-
-    test_file = Path(file).resolve().parent / 'test.csv'
-    pd.DataFrame(test_pairs).to_csv(test_file, index=False, header=False)   
-    print(f'Saved {test_file}')
 
 def load_raw_data(file: Union[str, Path]) -> Tuple[List, List]:
     """
-    Returns training data and test data
+    Returns training data and test data lists
     """
     with open(file) as json_file:
         data = json.load(json_file)
     return data['train'], data['valid']
+
+
+def generate_train_val_test_files(raw_data_file: Union[str, Path], autocorrect=False):
+    """
+    Generates 3 CSV files: train, validation, test.
+    """
+    train_data, test_data = load_raw_data(raw_data_file)
+
+    # build sentence pairs (context, next_utterance) from raw data
+    train_pairs = build_sentence_pairs_from_raw_data(train_data, autocorrect=autocorrect)
+    print(f'Train set {len(train_pairs):,}')
+    
+    test_pairs = build_sentence_pairs_from_raw_data(test_data,autocorrect=autocorrect)
+    print(f'Test set {len(test_pairs):,}')
+
+    # import pdb
+    # pdb.set_trace()
+
+    # save sentence pairs into train, validation and test CSV files
+    train_file = Path(raw_data_file).resolve().parent / 'train.csv'
+    pd.DataFrame(train_pairs[:-10000]).sample(frac=1).to_csv(train_file, index=False, header=False)
+    print(f'Saved {train_file}')
+
+    val_file = Path(raw_data_file).resolve().parent / 'val.csv'
+    pd.DataFrame(train_pairs[-10000:]).to_csv(val_file, index=False, header=False)
+    print(f'Saved {val_file}')
+
+    test_file = Path(raw_data_file).resolve().parent / 'test.csv'
+    pd.DataFrame(test_pairs).to_csv(test_file, index=False, header=False)   
+    print(f'Saved {test_file}')
 
 
 def build_sentence_pairs_from_raw_data(conversations, autocorrect=False):
@@ -90,14 +103,15 @@ def build_sentence_pairs_from_raw_data(conversations, autocorrect=False):
     for conversation in tqdm(conversations):
         for utterance in conversation['utterances']:
             next_utterance = utterance['candidates'][-1]
-            
+            # history = '.'.join(utterance['history'])
+
             if utterance['history'][0] == '__ SILENCE __':
                 history = '.'.join(utterance['history'][1:])
             else:
                 history = '.'.join(utterance['history'])
 
-            # if not history:
-            #     continue
+            if not history:
+                continue
 
             if autocorrect:
                 next_utterance = spell(next_utterance)
