@@ -59,13 +59,15 @@ def generate_train_validation_test_files(file: Union[str, Path],
     # os.path.join(DATA_DIR, 'val.csv'),
     train_file = Path(file).resolve().parent / 'train.csv'
     pd.DataFrame(train_pairs[:-10000]).to_csv(train_file, index=False, header=False)
+    print(f'Saved {train_file}')
 
     val_file = Path(file).resolve().parent / 'val.csv'
     pd.DataFrame(train_pairs[-10000:]).to_csv(val_file, index=False, header=False)
-    
+    print(f'Saved {val_file}')
+
     test_file = Path(file).resolve().parent / 'test.csv'
     pd.DataFrame(test_pairs).to_csv(test_file, index=False, header=False)   
-
+    print(f'Saved {test_file}')
 
 def load_raw_data(file: Union[str, Path]) -> Tuple[List, List]:
     """
@@ -114,7 +116,8 @@ def get_datasets_and_vocab(
     test,
     train_size: int = None,
     validation_size: int = None,
-    use_glove: bool = True,
+    use_glove_vectors: bool = True,
+    vectors_cache: str = None,
 ) -> Tuple[Dataset, Dataset, Dataset]:
     """
     Load and return PyTorch Datasets train, validation, test sets.
@@ -172,11 +175,12 @@ def get_datasets_and_vocab(
 
         # assign the previously constructed torchtext.vocab.Vocab
     # sentence_processor.vocab = vocab
-    if use_glove:
+    if use_glove_vectors:
         # vocabulary from GloVe
         sentence_processor.build_vocab(train_dataset,
                                        min_freq=3,
-                                       vectors='glove.6B.100d')
+                                       vectors='glove.6B.100d',
+                                       vectors_cache=vectors_cache)
     else:
         # new vocabulary from scratch
         sentence_processor.build_vocab(train_dataset, min_freq=3)

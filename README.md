@@ -38,6 +38,7 @@ Check your tokenization.
 - [x] Save checkpoints to gdrive, not to the instance.
 - [x] Load model from checkpoint.
 
+- [ ] Switch on gradient clipping.
 - [ ] Get a decent model.
     * [ ] + attention and context vector
     * [ ] + feed context vector at next step
