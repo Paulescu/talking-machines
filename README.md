@@ -34,29 +34,25 @@ Check your tokenization.
 
 # WIP
 
-- [x] Save model checkpoints during training.
-- [x] Save checkpoints to gdrive, not to the instance.
-- [x] Load model from checkpoint.
-
-Tricks & learnings:
-- [ ] Triple check the vocabulary you generated from the corpus.
-- [ ] Switch on gradient clipping.
-- [ ] Reduce LR on plateau (see [Reduce learning rate on plateau](https://github.com/marumalo/pytorch-seq2seq/blob/master/train.py))
+- [ ] Fit model using only last sentence from context.
+- [ ] Fit model without glove (decrease complexity and error sources).
+- [ ] Fit model for short targets only.
 
 - [ ] Get a decent model.
     * [ ] + attention and context vector
     * [ ] + feed context vector at next step
 
+Tricks & learnings:
+- [ ] Triple check the vocabulary you generated from the corpus.
+- [ ] Switch on gradient clipping.
+- [ ] Reduce LR on plateau (see [Reduce learning rate on plateau](https://github.com/marumalo/pytorch-seq2seq/blob/master/train.py))
+- [ ] Adjust teacher-forcing
+- [ ] Tie weights as in (here)[https://github.com/marumalo/pytorch-seq2seq/blob/master/model.py]
 - [ ] Implement beam-search decoding.
-
-Attention:
-- [x] Add Luong's attention
-- [-] Tie weights as in (here)[https://github.com/marumalo/pytorch-seq2seq/blob/master/model.py]
 
 
 Transformer:
 - [ ] Start transformer based chatbot.
-
 - [ ] Memory network to attend over personality?
 
 

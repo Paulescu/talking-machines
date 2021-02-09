@@ -35,8 +35,13 @@ EOS_TOKEN = "<EOS>"
 PAD_TOKEN = "<PAD>"
 UNK_TOKEN = "<UNK>"
 
+DATASETS = {
+    'convai': 'https://raw.githubusercontent.com/DeepPavlov/convai/master/data/export_2018-07-07_train.json',
+    'personachat': 'https://s3.amazonaws.com/datasets.huggingface.co/personachat/personachat_self_original.json',
+}
 
-def download_data(destination_dir):
+
+def download_data(dataset: str, destination_dir: str):
     """
     Downloads the initial dataset from remote URL
     """
@@ -47,8 +52,9 @@ def download_data(destination_dir):
         sys.stdout.write("\r" + progress_message)
         sys.stdout.flush()
 
-    url = 'https://s3.amazonaws.com/datasets.huggingface.co/personachat/personachat_self_original.json'
-    destination_file = str(Path(destination_dir) / 'personachat_self_original.json')
+    url = DATASETS[dataset]
+    print(f'Downloading from {url}...')
+    destination_file = str(Path(destination_dir) / url.split('/')[-1])
     wget.download(url, destination_file, bar=bar_progress)
 
 
@@ -61,29 +67,40 @@ def load_raw_data(file: Union[str, Path]) -> Tuple[List, List]:
     return data['train'], data['valid']
 
 
-def generate_train_val_test_files(raw_data_file: Union[str, Path], autocorrect=False):
+def generate_train_val_test_files(
+        raw_data_file: Union[str, Path],
+        autocorrect=False,
+        n_utterances_history=99999
+):
     """
     Generates 3 CSV files: train, validation, test.
     """
     train_data, test_data = load_raw_data(raw_data_file)
 
     # build sentence pairs (context, next_utterance) from raw data
-    train_pairs = build_sentence_pairs_from_raw_data(train_data, autocorrect=autocorrect)
+    train_pairs = build_sentence_pairs_from_raw_data(
+        train_data,
+        autocorrect=autocorrect,
+        n_utterances_history=n_utterances_history
+    )
     print(f'Train set {len(train_pairs):,}')
     
-    test_pairs = build_sentence_pairs_from_raw_data(test_data,autocorrect=autocorrect)
+    test_pairs = build_sentence_pairs_from_raw_data(
+        test_data,
+        autocorrect=autocorrect,
+        n_utterances_history=n_utterances_history
+    )
     print(f'Test set {len(test_pairs):,}')
-
-    # import pdb
-    # pdb.set_trace()
 
     # save sentence pairs into train, validation and test CSV files
     train_file = Path(raw_data_file).resolve().parent / 'train.csv'
-    pd.DataFrame(train_pairs[:-10000]).sample(frac=1).to_csv(train_file, index=False, header=False)
+    pd.DataFrame(train_pairs[:-10000]).to_csv(train_file, index=False,
+                                              header=False) # .sample(frac=1)
     print(f'Saved {train_file}')
 
     val_file = Path(raw_data_file).resolve().parent / 'val.csv'
-    pd.DataFrame(train_pairs[-10000:]).to_csv(val_file, index=False, header=False)
+    pd.DataFrame(train_pairs[-10000:]).to_csv(val_file, index=False,
+                                              header=False)
     print(f'Saved {val_file}')
 
     test_file = Path(raw_data_file).resolve().parent / 'test.csv'
@@ -91,7 +108,11 @@ def generate_train_val_test_files(raw_data_file: Union[str, Path], autocorrect=F
     print(f'Saved {test_file}')
 
 
-def build_sentence_pairs_from_raw_data(conversations, autocorrect=False):
+def build_sentence_pairs_from_raw_data(
+        conversations: List,
+        autocorrect=False,
+        n_utterances_history=99999
+):
     """
     Returns list of pairs (context, next_utterance) from the raw json file
     'conversations'
@@ -100,38 +121,46 @@ def build_sentence_pairs_from_raw_data(conversations, autocorrect=False):
     removed = 0
     spell = Speller(fast=True)
 
-    for conversation in tqdm(conversations):
+    for id, conversation in enumerate(tqdm(conversations)):
+
         for utterance in conversation['utterances']:
             next_utterance = utterance['candidates'][-1]
-            # history = '.'.join(utterance['history'])
+            past_utterances = utterance['history'][-n_utterances_history:]
 
-            if utterance['history'][0] == '__ SILENCE __':
-                history = '.'.join(utterance['history'][1:])
+            if not past_utterances:
+                # no past utterances, skip
+                continue
+
+            if past_utterances[0] == '__ SILENCE __':
+                history = ' '.join(past_utterances[1:])
             else:
-                history = '.'.join(utterance['history'])
+                history = ' '.join(past_utterances)
 
-            if not history:
+            # if id == 13980:
+            #     pdb.set_trace()
+            if history == '':
                 continue
 
             if autocorrect:
                 next_utterance = spell(next_utterance)
                 history = spell(history)
 
-            pairs.append([history, next_utterance])
+            pairs.append([id, history, next_utterance])
+            # pairs.append([history, next_utterance])
 
     print(f'{removed:,} lines removed')
     return pairs
 
 
 def get_datasets_and_vocab(
-    path_to_files,
-    train,
-    validation,
-    test,
-    train_size: int = None,
-    validation_size: int = None,
-    use_glove_vectors: bool = True,
-    vectors_cache: str = None,
+        path_to_files,
+        train,
+        validation,
+        test,
+        train_size: int = None,
+        validation_size: int = None,
+        use_glove_vectors: bool = True,
+        vectors_cache: str = None,
 ) -> Tuple[Dataset, Dataset, Dataset]:
     """
     Load and return PyTorch Datasets train, validation, test sets.
@@ -172,7 +201,7 @@ def get_datasets_and_vocab(
         include_lengths=True,
         lower=True,
     )
-    fields = [('src', sentence_processor), ('tgt', sentence_processor)]
+    fields = [('id', None), ('src', sentence_processor), ('tgt', sentence_processor)]
 
     # we tell torchtext the files in disk to look for, and how the text
     # data is organized in these files.

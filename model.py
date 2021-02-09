@@ -194,8 +194,8 @@ class Seq2seqRNN(nn.Module):
                  hidden_dim: int,
                  n_layers: int,
                  n_directions_encoder: int,
-                 device,
-                 dropout=0.0,
+                 device: torch.device,
+                 dropout: Optional[float] = 0.0,
                  pretrained_embeddings: Optional[Tensor] = {},
                  freeze_embeddings=False,
                  attention_type: str = None):
