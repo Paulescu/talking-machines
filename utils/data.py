@@ -28,7 +28,7 @@ from tqdm.auto import tqdm
 
 
 # from .vocab import WordVocab
-from .tokenizer import tokenizer
+# from .tokenizer import tokenizer
 # from .constants import *
 
 # special tokens
@@ -42,6 +42,102 @@ DATASETS = {
     'personachat': 'https://s3.amazonaws.com/datasets.huggingface.co/personachat/personachat_self_original.json',
 }
 
+# NEW stuff start
+import codecs
+
+def generate_file_with_sentence_pairs(
+    input_file: Path,
+    output_file: Path,
+    autocorrect: bool = False
+):
+
+    pairs = list()
+    previous_target_line = None
+
+    with codecs.open(input_file, 'r', 'utf-8', errors='ignore') as f:
+
+        for line in f:
+
+            # each line starts as an integer followed by a space.
+            # e.g. 1 bla bla bla
+            #      2 be be be
+            #      3 yo yo yo
+            # we store line_id and keep only the characters after the space.
+            position_first_space = line.find(' ')
+            line_id = int(line[:position_first_space])
+            line = line[position_first_space + 1:]
+
+            if line_id == 1:
+                previous_target_line = None
+
+            # extract source, target sentences
+            source_line, target_line, _, _ = line.split('\t')
+
+            if previous_target_line is not None:
+                # store pair (source, target) from previous iteration
+                pairs.append([previous_target_line, source_line])
+
+            # store pair (source, target) from this iteration
+            pairs.append([source_line, target_line])
+
+            previous_target_line = target_line
+
+    pd.DataFrame(pairs).to_csv(output_file, index=False, header=False)
+    print(f'Generated {output_file}')
+
+
+from nltk.tokenize.treebank import TreebankWordTokenizer
+word_tokenizer = TreebankWordTokenizer()
+
+def tokenizer(sentence):
+    return word_tokenizer.tokenize(sentence)
+
+def get_sentence_processor(
+        train_file: Path,
+        min_word_freq : int = 3,
+        max_vocab_size: int = 10000,
+        use_glove_vectors: bool = False,
+        vectors_cache: Path = None,
+) -> Field:
+    """"""
+    sentence_processor = Field(
+        tokenize=tokenizer,
+        init_token=BOS_TOKEN,
+        eos_token=EOS_TOKEN,
+        pad_token=PAD_TOKEN,
+        batch_first=True,
+        include_lengths=True,
+        lower=True,
+    )
+    fields = [('src', sentence_processor), ('tgt', sentence_processor)]
+
+    train_ds = TabularDataset(
+        path=train_file,
+        format='csv',
+        skip_header=False,
+        fields=fields,
+    )
+
+    if use_glove_vectors:
+        # vocabulary from GloVe
+        sentence_processor.build_vocab(
+            train_ds,
+            min_freq=min_word_freq,
+            max_size=max_vocab_size,
+            vectors='glove.6B.300d',
+            vectors_cache=vectors_cache,
+        )
+    else:
+        # new vocabulary from scratch
+        sentence_processor.build_vocab(
+            train_ds,
+            min_freq=min_word_freq,
+            max_size=max_vocab_size,
+        )
+
+    return sentence_processor
+
+# NEW stuff end
 
 def download_data(dataset: str, destination_dir: str):
     """
@@ -112,8 +208,9 @@ from torchtext.data import Field
 def get_torchtext_field(
         train_file: Path,
         min_word_freq : int = 3,
+        max_vocab_size: int = 10000,
         use_glove_vectors: bool = False,
-        vectors_cache: Path,
+        vectors_cache: Path = None,
 ) -> Field:
     """"""
     sentence_processor = Field(
@@ -126,7 +223,9 @@ def get_torchtext_field(
         lower=True,
     )
     fields = [('id', None),
-              ('src', sentence_processor), ('tgt', sentence_processor)]
+              ('src', sentence_processor),
+              ('tgt', sentence_processor)]
+
     train_ds = TabularDataset(
         path=train_file,
         format='csv',
@@ -139,13 +238,17 @@ def get_torchtext_field(
         sentence_processor.build_vocab(
             train_ds,
             min_freq=min_word_freq,
+            max_size=max_vocab_size,
             vectors='glove.6B.100d',
             vectors_cache=vectors_cache,
         )
     else:
         # new vocabulary from scratch
         sentence_processor.build_vocab(
-            train_ds, min_freq=min_word_freq)
+            train_ds,
+            min_freq=min_word_freq,
+            max_size=max_vocab_size,
+        )
 
     return sentence_processor
 
@@ -354,9 +457,7 @@ def get_datasets(
 
         train_path = new_train_path
 
-    fields = [('id', None),
-              ('src', sentence_processor),
-              ('tgt', sentence_processor)]
+    fields = [('src', sentence_processor), ('tgt', sentence_processor)]
 
     # generate potentially smaller datasets
     train_ds, val_ds, test_ds = TabularDataset.splits(

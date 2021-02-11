@@ -5,7 +5,7 @@ import random
 
 import pandas as pd
 
-from .data import load_raw_data
+# from .data import load_raw_data
 
 
 def save_vocab(vocab, path: Union[Path, str]):
@@ -46,7 +46,8 @@ def print_random_example(data_dir: Path, is_train: bool = True):
 
 
 import matplotlib.pyplot as plt
-from utils.tokenizer import tokenizer
+from utils.data import tokenizer
+
 def plot_sentence_lengths(
         train_file: Path,
         test_file: Path,
@@ -55,7 +56,7 @@ def plot_sentence_lengths(
 
     # train
     train = pd.read_csv(train_file, header=None)
-    train.columns = ['id', 'src', 'tgt']
+    train.columns = ['src', 'tgt']
     train_src_len = train['src'].apply(lambda x: len(tokenizer(x)))
     train_tgt_len = train['tgt'].apply(lambda x: len(tokenizer(x)))
 
@@ -66,7 +67,7 @@ def plot_sentence_lengths(
 
     # test
     test = pd.read_csv(test_file, header=None)
-    test.columns = ['id', 'src', 'tgt']
+    test.columns = ['src', 'tgt']
     test_src_len = test['src'].apply(lambda x: len(tokenizer(x)))
     test_tgt_len = test['tgt'].apply(lambda x: len(tokenizer(x)))
 

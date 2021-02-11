@@ -34,8 +34,8 @@ Check your tokenization.
 
 # WIP
 
-- [ ] Save whole torchtet field object.
-- [ ] Fit model using only last sentence from context.
+- [x] Save whole torchtet field object.
+- [x] Fit model using only last sentence from context.
 - [ ] Fit model without glove (decrease complexity and error sources).
 - [ ] Fit model for short targets only.
 
@@ -59,6 +59,7 @@ Transformer:
 
 # References
 
+- [Working code with Persona Chata data](https://github.com/urikz/ChatBot/blob/master/ShaLab/models/model.py)
 - [From RNNs to Transformers](https://dzone.com/articles/rnn-seq2seq-transformers-introduction-to-neural-ar)
 
 - https://github.com/pytorch/examples/blob/master/word_language_model/model.py
