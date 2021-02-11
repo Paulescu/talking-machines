@@ -34,6 +34,7 @@ Check your tokenization.
 
 # WIP
 
+- [ ] Save whole torchtet field object.
 - [ ] Fit model using only last sentence from context.
 - [ ] Fit model without glove (decrease complexity and error sources).
 - [ ] Fit model for short targets only.

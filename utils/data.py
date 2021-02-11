@@ -22,8 +22,10 @@ from torchtext.data import (
 )
 # from torchtext.data.utils import get_tokenizer
 from torchtext.data.utils import interleave_keys
+from torchtext.vocab import Vocab
 from autocorrect import Speller
 from tqdm.auto import tqdm
+
 
 # from .vocab import WordVocab
 from .tokenizer import tokenizer
@@ -66,9 +68,88 @@ def load_raw_data(file: Union[str, Path]) -> Tuple[List, List]:
         data = json.load(json_file)
     return data['train'], data['valid']
 
+def get_vocab(
+        train_file: Path,
+        min_word_freq : int = 3,
+        use_glove_vectors: bool = False
+) -> Vocab:
+    """"""
+    sentence_processor = Field(
+        tokenize=tokenizer,
+        init_token=BOS_TOKEN,
+        eos_token=EOS_TOKEN,
+        pad_token=PAD_TOKEN,
+        batch_first=True,
+        include_lengths=True,
+        lower=True,
+    )
+    fields = [('id', None),
+              ('src', sentence_processor), ('tgt', sentence_processor)]
+    train_ds = TabularDataset(
+        path=train_file,
+        format='csv',
+        skip_header=False,
+        fields=fields,
+    )
+
+    if use_glove_vectors:
+        # vocabulary from GloVe
+        sentence_processor.build_vocab(
+            train_ds,
+            min_freq=min_word_freq,
+            vectors='glove.6B.100d'
+        )
+    else:
+        # new vocabulary from scratch
+        sentence_processor.build_vocab(
+            train_ds, min_freq=min_word_freq)
+
+    return sentence_processor.vocab
+
+
+from torchtext.data import Field
+
+def get_torchtext_field(
+        train_file: Path,
+        min_word_freq : int = 3,
+        use_glove_vectors: bool = False
+) -> Field:
+    """"""
+    sentence_processor = Field(
+        tokenize=tokenizer,
+        init_token=BOS_TOKEN,
+        eos_token=EOS_TOKEN,
+        pad_token=PAD_TOKEN,
+        batch_first=True,
+        include_lengths=True,
+        lower=True,
+    )
+    fields = [('id', None),
+              ('src', sentence_processor), ('tgt', sentence_processor)]
+    train_ds = TabularDataset(
+        path=train_file,
+        format='csv',
+        skip_header=False,
+        fields=fields,
+    )
+
+    if use_glove_vectors:
+        # vocabulary from GloVe
+        sentence_processor.build_vocab(
+            train_ds,
+            min_freq=min_word_freq,
+            vectors='glove.6B.100d'
+        )
+    else:
+        # new vocabulary from scratch
+        sentence_processor.build_vocab(
+            train_ds, min_freq=min_word_freq)
+
+    return sentence_processor
 
 def generate_train_val_test_files(
-        raw_data_file: Union[str, Path],
+        raw_data_file: Path,
+        names: Tuple[str] = ('train.csv', 'val.csv', 'test.csv'),
         autocorrect=False,
         n_utterances_history=99999
 ):
@@ -93,17 +174,17 @@ def generate_train_val_test_files(
     print(f'Test set {len(test_pairs):,}')
 
     # save sentence pairs into train, validation and test CSV files
-    train_file = Path(raw_data_file).resolve().parent / 'train.csv'
+    train_file = Path(raw_data_file).resolve().parent / names[0]
     pd.DataFrame(train_pairs[:-10000]).to_csv(train_file, index=False,
                                               header=False) # .sample(frac=1)
     print(f'Saved {train_file}')
 
-    val_file = Path(raw_data_file).resolve().parent / 'val.csv'
+    val_file = Path(raw_data_file).resolve().parent / names[1]
     pd.DataFrame(train_pairs[-10000:]).to_csv(val_file, index=False,
                                               header=False)
     print(f'Saved {val_file}')
 
-    test_file = Path(raw_data_file).resolve().parent / 'test.csv'
+    test_file = Path(raw_data_file).resolve().parent / names[2]
     pd.DataFrame(test_pairs).to_csv(test_file, index=False, header=False)   
     print(f'Saved {test_file}')
 
@@ -159,7 +240,7 @@ def get_datasets_and_vocab(
         test,
         train_size: int = None,
         validation_size: int = None,
-        use_glove_vectors: bool = True,
+        use_glove_vectors: bool = False,
         vectors_cache: str = None,
 ) -> Tuple[Dataset, Dataset, Dataset]:
     """
@@ -178,19 +259,19 @@ def get_datasets_and_vocab(
         pd.read_csv(train_path, header=None) \
             .head(train_size) \
             .to_csv(new_train_path, index=False, header=None)
-        train_path = new_train_path
-    
+        # train_path = new_train_path
+    else:
+        new_train_path = train_path
+
     if validation_size:
         # generate a temporal smaller version of the validation set
-        new_validation_path = os.path.join(path_to_files, f'validation_{validation_size}.csv')
+        new_validation_path = os.path.join(path_to_files,
+                                           f'validation_{validation_size}.csv')
         pd.read_csv(validation_path, header=None) \
             .head(validation_size) \
             .to_csv(new_validation_path, index=False, header=None)
         validation_path = new_validation_path
 
-    # we tell torchtext we want to lowercase text and tokenize it using
-    # the given 'tokenizer_fn'
-    # tokenizer = get_tokenizer('basic_english', language='en')
     sentence_processor = Field(
         tokenize=tokenizer,
         init_token=BOS_TOKEN,
@@ -202,22 +283,14 @@ def get_datasets_and_vocab(
         lower=True,
     )
     fields = [('id', None), ('src', sentence_processor), ('tgt', sentence_processor)]
-
-    # we tell torchtext the files in disk to look for, and how the text
-    # data is organized in these files.
-    # In this case, each file has 2 columns 'src' and 'tgt' 
-    train_dataset, validation_dataset, test_dataset = TabularDataset.splits(
+    train_dataset = TabularDataset.splits(
         path='',
         train=train_path,
-        validation=validation_path,
-        test=test_path,
         format='csv',
         skip_header=False,
         fields=fields,
     )
 
-        # assign the previously constructed torchtext.vocab.Vocab
-    # sentence_processor.vocab = vocab
     if use_glove_vectors:
         # vocabulary from GloVe
         sentence_processor.build_vocab(train_dataset,
@@ -227,7 +300,20 @@ def get_datasets_and_vocab(
     else:
         # new vocabulary from scratch
         sentence_processor.build_vocab(train_dataset, min_freq=3)
-    
+
+    # TODO: here
+
+    # generate potentially smaller datasets
+    train_dataset, validation_dataset, test_dataset = TabularDataset.splits(
+        path='',
+        train=new_train_path,
+        validation=validation_path,
+        test=test_path,
+        format='csv',
+        skip_header=False,
+        fields=fields,
+    )
+
     if train_size:
         # delete temporary file
         os.remove(train_path)
@@ -237,6 +323,55 @@ def get_datasets_and_vocab(
         os.remove(validation_path)
 
     return train_dataset, validation_dataset, test_dataset, sentence_processor.vocab
+
+
+def get_datasets(
+        path: Path,
+        train: str,
+        val: str,
+        test: str,
+        sentence_processor: Field,
+        train_size: int = None,
+) -> Tuple[Dataset, Dataset, Dataset]:
+    """
+    Load and return PyTorch Datasets train, validation, test sets.
+
+    By using torchtext APIs: Field(), TabularDataset.split() we avoid
+    writing a lot of boilerplate code.
+    """
+    train_path = os.path.join(path, train)
+    val_path = os.path.join(path, val)
+    test_path = os.path.join(path, test)
+
+    if train_size:
+        # generate a temporal smaller version of the train set
+        new_train_path = os.path.join(path, f'train_{train_size}.csv')
+        pd.read_csv(train_path, header=None) \
+            .head(train_size) \
+            .to_csv(new_train_path, index=False, header=None)
+
+        train_path = new_train_path
+
+    fields = [('id', None),
+              ('src', sentence_processor),
+              ('tgt', sentence_processor)]
+
+    # generate potentially smaller datasets
+    train_ds, val_ds, test_ds = TabularDataset.splits(
+        path='',
+        train=train_path,
+        validation=val_path,
+        test=test_path,
+        format='csv',
+        skip_header=False,
+        fields=fields,
+    )
+
+    if train_size:
+        # delete temporary file
+        os.remove(train_path)
+
+    return train_ds, val_ds, test_ds
 
 def get_dataloaders(
     train_dataset: Dataset,
