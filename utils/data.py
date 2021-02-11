@@ -112,7 +112,8 @@ from torchtext.data import Field
 def get_torchtext_field(
         train_file: Path,
         min_word_freq : int = 3,
-        use_glove_vectors: bool = False
+        use_glove_vectors: bool = False,
+        vectors_cache: Path,
 ) -> Field:
     """"""
     sentence_processor = Field(
@@ -138,7 +139,8 @@ def get_torchtext_field(
         sentence_processor.build_vocab(
             train_ds,
             min_freq=min_word_freq,
-            vectors='glove.6B.100d'
+            vectors='glove.6B.100d',
+            vectors_cache=vectors_cache,
         )
     else:
         # new vocabulary from scratch
