@@ -59,7 +59,13 @@ Transformer:
 
 # References
 
+- [Vocab size PersonaChat dataset and perplexities](https://arxiv.org/pdf/2008.05640v1.pdf)
+- [Seq2seq model hyper-parameters](https://www.aclweb.org/anthology/P19-1004.pdf)
+
+
+
 - [Working code with Persona Chata data](https://github.com/urikz/ChatBot/blob/master/ShaLab/models/model.py)
+
 - [From RNNs to Transformers](https://dzone.com/articles/rnn-seq2seq-transformers-introduction-to-neural-ar)
 
 - https://github.com/pytorch/examples/blob/master/word_language_model/model.py

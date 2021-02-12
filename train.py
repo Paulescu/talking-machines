@@ -21,7 +21,7 @@ from util import (
 def cross_entropy_loss_fn(pad_token_id = None):
     """Returns a cross-entropy loss function that ignores positions with
     padding tokens"""
-    return nn.CrossEntropyLoss(ignore_index=pad_token_id)
+    return nn.CrossEntropyLoss(ignore_index=pad_token_id, reduction='sum')
     
 class Seq2seqRNNTrainer:
 
@@ -35,6 +35,7 @@ class Seq2seqRNNTrainer:
                  teacher_forcing: float = 0.0,
                  with_cuda: bool = True,
                  checkpoint_dir: Union[str, Path] = Path('./')):
+
         cuda_condition = torch.cuda.is_available() and with_cuda
         self.device = torch.device('cuda' if cuda_condition else 'cpu')
         
@@ -43,6 +44,7 @@ class Seq2seqRNNTrainer:
         self.val_dataloader = val_dataloader
         self.gradient_clip = gradient_clip
         self.teacher_forcing = teacher_forcing
+        self.pad_token_id = pad_token_id
 
         self.train_size = get_dataset_size(self.train_dataloader)
         self.val_size = get_dataset_size(self.val_dataloader)
@@ -97,11 +99,13 @@ class Seq2seqRNNTrainer:
         else:
             self.model.eval()
         
-        epoch_loss = 0
-        epoch_accuracy = 0
+        total_loss = 0
+        total_tgt_tokens = 0
         teacher_forcing = self.teacher_forcing if train else 0.0
         with tqdm(total=dataset_size) as pbar:
+
             for batch in dataloader:
+
                 # forward step
                 src, src_len = batch.src
                 tgt_input, _ = batch.tgt
@@ -112,11 +116,19 @@ class Seq2seqRNNTrainer:
                     teacher_forcing=teacher_forcing
                 ).to(self.device)
 
-                # compute batch loss after a bit of reshaping
+                # loss
                 vocab_size = tgt_output_scores.shape[-1]
-                tgt_output_scores = tgt_output_scores.reshape(-1, vocab_size)               
-                tgt_output = tgt_input[:, 1:].reshape(-1)
-                loss = self.loss_fn(tgt_output_scores, tgt_output)
+                loss = self.loss_fn(
+                    tgt_output_scores.reshape(-1, vocab_size),
+                    tgt_input[:, 1:].reshape(-1)
+                )
+
+                # pdb.set_trace()
+
+                total_loss += loss.item()
+                total_tgt_tokens += (tgt_input[:, 1:] != self.pad_token_id).sum().item()
+
+                # pdb.set_trace()
 
                 if train:
                     # backward step
@@ -126,13 +138,13 @@ class Seq2seqRNNTrainer:
                                                    self.gradient_clip)
                     self.optimizer.step()
 
-                epoch_loss += batch.batch_size * loss.item()
-
                 pbar.update(batch.batch_size)
 
-        epoch_loss = epoch_loss / dataset_size
-        perplexity = math.exp(epoch_loss)
-        return epoch_loss, perplexity
+        loss = total_loss / dataset_size
+        import numpy as np
+        perplexity = np.exp(total_loss / total_tgt_tokens)
+
+        return loss, perplexity
 
     def save(self):
         

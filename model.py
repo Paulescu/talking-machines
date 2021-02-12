@@ -36,17 +36,20 @@ class EncoderRNN(nn.Module):
         """
         embedded = self.dropout(self.embedding(src))
 
+        # TODO: not sure about this piece
         # Tensor -> PackedSequence
         # We do this transformation so that 'hidden_states' and
         # 'cell_states' below come from the last non-padding token, NOT the last token in the src sequence. #finesse
-        packed_embedded = pack_padded_sequence(embedded, src_lengths.cpu(),
-                                               batch_first=True,
-                                               enforce_sorted=False)
+        # packed_embedded = pack_padded_sequence(embedded, src_lengths.cpu(),
+        #                                        batch_first=True,
+        #                                        enforce_sorted=False)
+        #
+        # outputs, (hidden_states, cell_states) = self.rnn(packed_embedded)
+        #
+        # # PackedSequence -> Tensor: [batch_size, max(src_lengths), n_directions * hidden_dim]
+        # outputs, _ = pad_packed_sequence(outputs)
 
-        outputs, (hidden_states, cell_states) = self.rnn(packed_embedded)
-
-        # PackedSequence -> Tensor: [batch_size, max(src_lengths), n_directions * hidden_dim]
-        outputs, _ = pad_packed_sequence(outputs)
+        outputs, (hidden_states, cell_states) = self.rnn(embedded)
 
         # outputs:
         # [batch_size, max(src_lengths), n_directions * hidden_dim] -> [batch_size, max(src_lengths), hidden_dim]
@@ -220,13 +223,25 @@ class Seq2seqRNN(nn.Module):
             self.pretrained_embeddings = False
 
         # encoder network
-        self.encoder = EncoderRNN(self.embedding, embedding_dim, hidden_dim, n_directions_encoder, n_layers,
-                                  dropout=dropout)
+        self.encoder = EncoderRNN(
+            self.embedding,
+            embedding_dim,
+            hidden_dim,
+            n_directions_encoder,
+            n_layers,
+            dropout=dropout
+        )
         
         # decoder network
-        self.decoder = DecoderRNN(self.embedding, embedding_dim, vocab_size, hidden_dim, n_layers,
-                                  dropout=dropout,
-                                  attention_type=attention_type)
+        self.decoder = DecoderRNN(
+            self.embedding,
+            embedding_dim,
+            vocab_size,
+            hidden_dim,
+            n_layers,
+            dropout=dropout,
+            attention_type=attention_type
+        )
 
     def forward(self,
                 src,
