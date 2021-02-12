@@ -140,9 +140,9 @@ class Seq2seqRNNTrainer:
 
                 pbar.update(batch.batch_size)
 
-        loss = total_loss / dataset_size
+        loss = total_loss / total_tgt_tokens
         import numpy as np
-        perplexity = np.exp(total_loss / total_tgt_tokens)
+        perplexity = np.exp(loss)
 
         return loss, perplexity
 
