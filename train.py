@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 
 from util import (
     count_trainable_parameters,
@@ -30,6 +30,7 @@ class Seq2seqRNNTrainer:
                  train_dataloader,
                  val_dataloader,
                  learning_rate: float = 3e-4,
+                 momentum: float = 0.9,
                  pad_token_id = None,
                  gradient_clip: float = 99999,
                  teacher_forcing: float = 0.0,
@@ -50,7 +51,9 @@ class Seq2seqRNNTrainer:
         self.val_size = get_dataset_size(self.val_dataloader)
 
         self.loss_fn = cross_entropy_loss_fn(pad_token_id)
-        self.optimizer = Adam(model.parameters(), lr=learning_rate)
+        # self.optimizer = Adam(model.parameters(), lr=learning_rate)
+        self.optimizer = SGD(model.parameters(),
+                             lr=learning_rate, momentum=momentum)
         
         # state variables
         self.min_test_loss = float('inf')

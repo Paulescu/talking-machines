@@ -525,7 +525,7 @@ def get_dataloaders(
         device=device,
         sort_key=sort_key,
         sort_within_batch=True,
-        batch_size_fn=batch_size_fn,
+        # batch_size_fn=batch_size_fn,
     )
 
     # pdb.set_trace()

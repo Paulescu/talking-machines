@@ -12,13 +12,14 @@ import torch.nn.functional as F
 
 class EncoderRNN(nn.Module):
 
-    def __init__(self,
-                 embedding: nn.Embedding,
-                 embedding_dim: int,
-                 hidden_dim: int,
-                 n_directions: int,
-                 n_layers: int,
-                 dropout=0.0):
+    def __init__(
+        self,
+        embedding: nn.Embedding,
+        hidden_dim: int,
+        n_directions: int,
+        n_layers: int,
+        dropout=0.0
+    ):
         super(EncoderRNN, self).__init__()
         self.n_layers = n_layers
         self.n_directions = n_directions
@@ -26,10 +27,14 @@ class EncoderRNN(nn.Module):
 
         self.embedding = embedding
         self.dropout = nn.Dropout(dropout)
-        self.rnn = nn.LSTM(embedding_dim, hidden_dim, n_layers,
-                           batch_first=True,
-                           dropout=(0 if n_layers == 1 else dropout),
-                           bidirectional=(True if n_directions == 2 else False))
+        self.rnn = nn.LSTM(
+            embedding_dim=embedding.shape[1],
+            hidden_dim,
+            n_layers,
+            batch_first=True,
+            dropout=(0 if n_layers == 1 else dropout),
+            bidirectional=(True if n_directions == 2 else False)
+        )
 
     def forward(self, src, src_lengths) -> Tuple[Tensor, Tensor, Tensor]:
         """
@@ -39,62 +44,82 @@ class EncoderRNN(nn.Module):
         # TODO: not sure about this piece
         # Tensor -> PackedSequence
         # We do this transformation so that 'hidden_states' and
-        # 'cell_states' below come from the last non-padding token, NOT the last token in the src sequence. #finesse
-        # packed_embedded = pack_padded_sequence(embedded, src_lengths.cpu(),
-        #                                        batch_first=True,
-        #                                        enforce_sorted=False)
-        #
-        # outputs, (hidden_states, cell_states) = self.rnn(packed_embedded)
-        #
-        # # PackedSequence -> Tensor: [batch_size, max(src_lengths), n_directions * hidden_dim]
-        # outputs, _ = pad_packed_sequence(outputs)
+        # 'cell_states' below come from the last non-padding token, NOT the last
+        # token in the src sequence. #finesse
+        packed_embedded = pack_padded_sequence(
+            embedded,
+            src_lengths.cpu(),
+            batch_first=True,
+            # enforce_sorted=False
+        )
+        
+        outputs, (hidden_states, cell_states) = self.rnn(packed_embedded)
+        
+        # PackedSequence -> Tensor: [batch_size, max(src_lengths), n_directions * hidden_dim]
+        outputs, _ = pad_packed_sequence(outputs)
 
-        outputs, (hidden_states, cell_states) = self.rnn(embedded)
+        # outputs, (hidden_states, cell_states) = self.rnn(embedded)
 
         # outputs:
-        # [batch_size, max(src_lengths), n_directions * hidden_dim] -> [batch_size, max(src_lengths), hidden_dim]
+        # [batch_size, max(src_lengths), n_directions * hidden_dim] -> 
+        # [batch_size, max(src_lengths), hidden_dim]
         batch_size, max_src_len = src.shape[:2]
-        outputs = outputs.view(batch_size, max_src_len, self.n_directions, self.hidden_dim).mean(dim=-2)
+        outputs = outputs.view(
+            batch_size, max_src_len, self.n_directions, self.hidden_dim
+        ).sum(dim=-2)
 
-        # Mean-reduce hidden_states, cell_states along 'directions' axis
-        # [n_layers * n_directions, batch_size, hidden_dim] -> [n_layers, batch_size, hidden_dim]
-        hidden_states = hidden_states.view(self.n_layers, self.n_directions, batch_size, self.hidden_dim).mean(dim=1)
-        cell_states = cell_states.view(self.n_layers, self.n_directions, batch_size, self.hidden_dim).mean(dim=1)
+        # Sum hidden_states, cell_states along 'directions' axis
+        # [n_layers * n_directions, batch_size, hidden_dim] -> 
+        # [n_layers, batch_size, hidden_dim]
+        hidden_states = hidden_states.view(
+            self.n_layers, self.n_directions, batch_size, self.hidden_dim
+        ).sum(dim=1)
+        cell_states = cell_states.view(
+            self.n_layers, self.n_directions, batch_size, self.hidden_dim
+        ).sum(dim=1)
 
         return outputs, hidden_states, cell_states
 
 
 class DecoderRNN(nn.Module):
 
-    def __init__(self,
-                 embedding: nn.Embedding,
-                 embedding_dim: int,
-                 vocab_size: int,
-                 hidden_dim: int,
-                 n_layers: int,
-                 dropout: float = 0.0,
-                 attention_type: str = None):
+    def __init__(
+        self,
+        embedding: nn.Embedding,
+        vocab_size: int,
+        hidden_dim: int,
+        n_layers: int,
+        dropout: float = 0.0,
+        attention_type: str = None,
+        padding_idx: int = -1,
+    ):
         super(DecoderRNN, self).__init__()
         self.vocab_size = vocab_size
-
+        
         self.embedding = embedding
         self.dropout = nn.Dropout(dropout)
-        self.rnn = nn.LSTM(embedding_dim, hidden_dim, n_layers,
-                           batch_first=True,
-                           dropout=(0 if n_layers == 1 else dropout),
-                           bidirectional=False)
+        self.rnn = nn.LSTM(
+            embedding_dim=embedding.shape[1],
+            hidden_dim,
+            n_layers,
+            batch_first=True,
+            dropout=(0 if n_layers == 1 else dropout),
+            bidirectional=False
+        )
         self.fc_output = nn.Linear(hidden_dim, vocab_size)
 
-        self.use_attention = attention_type is not None
-        if self.use_attention:
-            self.attention = Attention(hidden_dim, attention_type)
-            self.w = nn.Linear(hidden_dim * 2, hidden_dim)
+        # self.use_attention = attention_type is not None
+        # if self.use_attention:
+        #     self.attention = Attention(hidden_dim, attention_type)
+        #     self.w = nn.Linear(hidden_dim * 2, hidden_dim)
 
-    def forward(self,
-                input: Tensor,
-                hidden_state: Tensor,
-                cell_state: Tensor,
-                encoder_outputs: Optional[Tensor] = {}):
+    def forward(
+        self,
+        input: Tensor,
+        hidden_state: Tensor,
+        cell_state: Tensor,
+        encoder_outputs: Optional[Tensor] = {}
+    ):
         """
         Decodes one tgt word, NOT the whole tgt sentence.
         """
@@ -104,27 +129,32 @@ class DecoderRNN(nn.Module):
         embedded_input = embedded_input.unsqueeze(1)
 
         # RNN stuff
-        decoder_output, (next_hidden_state, next_cell_state) = self.rnn(embedded_input, (hidden_state, cell_state))
+        decoder_output, (next_hidden_state, next_cell_state) = \
+            self.rnn(embedded_input, (hidden_state, cell_state))
 
-        if self.use_attention:
+        # if self.use_attention:
 
-            # attention weights: [batch_size, max_src_len]
-            attn_weights = self.attention(decoder_output, encoder_outputs)
+        #     # attention weights: [batch_size, max_src_len]
+        #     attn_weights = self.attention(decoder_output, encoder_outputs)
 
-            # context vector: [batch_size, 1, hidden_dim]
-            context = torch.bmm(
-                attn_weights.unsqueeze(1),  # [batch_size, 1, max_src_len]
-                encoder_outputs  # [batch_size, max_src_len, hidden_dim]
-            )
+        #     # context vector: [batch_size, 1, hidden_dim]
+        #     context = torch.bmm(
+        #         attn_weights.unsqueeze(1),  # [batch_size, 1, max_src_len]
+        #         encoder_outputs  # [batch_size, max_src_len, hidden_dim]
+        #     )
 
-            # concatenate context_vector and decoder_output: [batch_size, 1, hidden_dim*2]
-            concat = torch.cat((decoder_output, context), dim=2)
+        #     # concatenate context_vector and decoder_output: [batch_size, 1, hidden_dim*2]
+        #     concat = torch.cat((decoder_output, context), dim=2)
 
-            # Linear layers + tanh(): [batch_size, 1, hidden_dim]
-            decoder_output = self.w(concat).tanh()
+        #     # Linear layers + tanh(): [batch_size, 1, hidden_dim]
+        #     decoder_output = self.w(concat).tanh()
 
         # [batch_size, 1, vocab_size]
         scores = self.fc_output(decoder_output)
+
+        if self.padding_idx >= 0:
+            NEAR_INF = 1e20
+            scores[:, :, self.padding_idx] = -NEAR_INF
 
         # [batch_size, vocab_size]
         scores = scores.squeeze(1)
@@ -191,19 +221,23 @@ class Attention(nn.Module):
 
 class Seq2seqRNN(nn.Module):
 
-    def __init__(self,
-                 vocab_size: int,
-                 embedding_dim: int,
-                 hidden_dim: int,
-                 n_layers: int,
-                 n_directions_encoder: int,
-                 device: torch.device,
-                 dropout: Optional[float] = 0.0,
-                 pretrained_embeddings: Optional[Tensor] = {},
-                 freeze_embeddings=False,
-                 attention_type: str = None):
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        hidden_dim: int,
+        n_layers: int,
+        n_directions_encoder: int,
+        device: torch.device,
+        dropout: Optional[float] = 0.0,
+
+        pretrained_embeddings: Optional[Tensor] = None,
+        # freeze_embeddings=False,
+        attention_type: str = None
+    ):
 
         super(Seq2seqRNN, self).__init__()
+
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
@@ -214,12 +248,18 @@ class Seq2seqRNN(nn.Module):
         # We let the user choose between
         # - pre-trained vs random initial embeddings
         # - fine-tune embeddings vs freeze them.
-        if len(pretrained_embeddings) > 0:
-            assert (vocab_size, embedding_dim) == pretrained_embeddings.shape, 'shape != (vocab_size, embedding_dim)'
-            self.embedding = nn.Embedding.from_pretrained(pretrained_embeddings, freeze=freeze_embeddings)
+        if isinstance(pretrained_embeddings, Tensor):
+            assert (vocab_size, embedding_dim) == pretrained_embeddings.shape, \
+                'shape != (vocab_size, embedding_dim)'
+            self.embedding = nn.Embedding.from_pretrained(
+                pretrained_embeddings, padding_idx=padding_idx, freeze=False)
+            
+            # pdb.set_trace()
+            
             self.pretrained_embeddings = True
         else:
-            self.embedding = nn.Embedding(vocab_size, embedding_dim)
+            self.embedding = nn.Embedding(
+                vocab_size, embedding_dim, padding_idx=padding_idx)
             self.pretrained_embeddings = False
 
         # encoder network
