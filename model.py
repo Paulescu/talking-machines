@@ -15,6 +15,7 @@ class EncoderRNN(nn.Module):
     def __init__(
         self,
         embedding: nn.Embedding,
+        embedding_dim,
         hidden_dim: int,
         n_directions: int,
         n_layers: int,
@@ -28,7 +29,7 @@ class EncoderRNN(nn.Module):
         self.embedding = embedding
         self.dropout = nn.Dropout(dropout)
         self.rnn = nn.LSTM(
-            embedding_dim=embedding.shape[1],
+            embedding_dim,
             hidden_dim,
             n_layers,
             batch_first=True,
@@ -50,7 +51,7 @@ class EncoderRNN(nn.Module):
             embedded,
             src_lengths.cpu(),
             batch_first=True,
-            # enforce_sorted=False
+            enforce_sorted=False
         )
         
         outputs, (hidden_states, cell_states) = self.rnn(packed_embedded)
@@ -86,6 +87,7 @@ class DecoderRNN(nn.Module):
     def __init__(
         self,
         embedding: nn.Embedding,
+        embedding_dim,
         vocab_size: int,
         hidden_dim: int,
         n_layers: int,
@@ -95,11 +97,12 @@ class DecoderRNN(nn.Module):
     ):
         super(DecoderRNN, self).__init__()
         self.vocab_size = vocab_size
+        self.padding_idx = padding_idx
         
         self.embedding = embedding
         self.dropout = nn.Dropout(dropout)
         self.rnn = nn.LSTM(
-            embedding_dim=embedding.shape[1],
+            embedding_dim,
             hidden_dim,
             n_layers,
             batch_first=True,
@@ -228,11 +231,10 @@ class Seq2seqRNN(nn.Module):
         hidden_dim: int,
         n_layers: int,
         n_directions_encoder: int,
+        padding_idx: int,
         device: torch.device,
         dropout: Optional[float] = 0.0,
-
         pretrained_embeddings: Optional[Tensor] = None,
-        # freeze_embeddings=False,
         attention_type: str = None
     ):
 
