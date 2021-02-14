@@ -9,7 +9,6 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import torch.nn.functional as F
 
 
-
 class EncoderRNN(nn.Module):
 
     def __init__(
@@ -98,7 +97,7 @@ class DecoderRNN(nn.Module):
         super(DecoderRNN, self).__init__()
         self.vocab_size = vocab_size
         self.padding_idx = padding_idx
-        
+
         self.embedding = embedding
         self.dropout = nn.Dropout(dropout)
         self.rnn = nn.LSTM(

@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam, SGD
+from torch import optim
 
 from util import (
     count_trainable_parameters,
@@ -51,10 +52,19 @@ class Seq2seqRNNTrainer:
         self.val_size = get_dataset_size(self.val_dataloader)
 
         self.loss_fn = cross_entropy_loss_fn(pad_token_id)
-        # self.optimizer = Adam(model.parameters(), lr=learning_rate)
-        self.optimizer = SGD(model.parameters(),
-                             lr=learning_rate, momentum=momentum)
+        self.optimizer = Adam(model.parameters(), lr=learning_rate)
+        # self.optimizer = SGD(model.parameters(),
+                            #  lr=learning_rate, momentum=momentum)
         
+        self.lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer=self.optimizer,
+            mode='min',
+            factor=0.25,
+            patience=0,
+            cooldown=1,
+            verbose=True,
+        )
+
         # state variables
         self.min_test_loss = float('inf')
         self.min_test_perplexity = float('inf')
@@ -69,9 +79,19 @@ class Seq2seqRNNTrainer:
 
         self.run_id = get_random_id()
 
+    def get_learning_rate(self):
+        return self.optimizer.state_dict()['param_groups'][0]['lr']
+
+    def update_lr(self, val_loss):
+        self.lr_scheduler.step(val_loss, self.n_epochs)
+
     def train_test_loop(self, n_epochs):
 
         for epoch in range(n_epochs):
+
+            current_lr = self.get_learning_rate()
+            print(f'Current LR: {current_lr}')
+
             train_loss, train_ppl = self.train(epoch)
             test_loss, test_ppl = self.test(epoch)
 
@@ -82,7 +102,11 @@ class Seq2seqRNNTrainer:
             # save checkpoint if test loss is lower than self.min_test_loss
             if test_loss < self.min_test_loss:
                 self.min_test_loss = test_loss
-                self.save()
+            
+            # save always checkpoint
+            self.save()
+
+            self.update_lr(test_loss)
 
             # update internal variable
             self.n_epochs += 1
@@ -104,7 +128,10 @@ class Seq2seqRNNTrainer:
         
         total_loss = 0
         total_tgt_tokens = 0
-        teacher_forcing = self.teacher_forcing if train else 0.0
+
+        # teacher_forcing = self.teacher_forcing if train else 0.0
+        teacher_forcing = self.teacher_forcing
+
         with tqdm(total=dataset_size) as pbar:
 
             for batch in dataloader:
