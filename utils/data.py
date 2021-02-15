@@ -48,11 +48,12 @@ import codecs
 def generate_file_with_sentence_pairs(
     input_file: Path,
     output_file: Path,
-    autocorrect: bool = False
+    n_past_utterances: int = 0,
+    autocorrect: bool = False,
 ):
 
     pairs = list()
-    previous_target_line = None
+    past_utterances = []
 
     with codecs.open(input_file, 'r', 'utf-8', errors='ignore') as f:
 
@@ -67,23 +68,39 @@ def generate_file_with_sentence_pairs(
             line_id = int(line[:position_first_space])
             line = line[position_first_space + 1:]
 
-            if line_id == 1:
-                previous_target_line = None
-
             # extract source, target sentences
-            source_line, target_line, _, _ = line.split('\t')
+            src_sentence, tgt_sentence, _, _ = line.split('\t')
 
-            if previous_target_line is not None:
-                # store pair (source, target) from previous iteration
-                pairs.append([previous_target_line, source_line])
+            if line_id == 1:
+                # no history
+                past_utterances = [src_sentence]
+            else:
+                # append history
+                past_utterances.append(src_sentence)
+
+            # if previous_target_line is not None:
+            #
+            #     pdb.set_trace()
+            #
+            #     # store pair (source, target) from previous iteration
+            #     pairs.append([previous_target_line, source_line])
 
             # store pair (source, target) from this iteration
-            pairs.append([source_line, target_line])
+            # past_utterances.append(source_line)
+            conversation_history = ' '.join(past_utterances[-n_past_utterances:])
+            pairs.append([conversation_history, tgt_sentence])
 
-            previous_target_line = target_line
+            # update 'past_utterances' for the next loop iteration
+            past_utterances.append(tgt_sentence)
+
+            # if line_id == 7:
+            #     break
 
     pd.DataFrame(pairs).to_csv(output_file, index=False, header=False)
     print(f'Generated {output_file}')
+
+    # df =  pd.DataFrame(pairs)
+    # pdb.set_trace()
 
 
 from nltk.tokenize.treebank import TreebankWordTokenizer
