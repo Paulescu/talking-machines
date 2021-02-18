@@ -281,7 +281,8 @@ class Seq2seqRNN(nn.Module):
             hidden_dim,
             n_layers,
             dropout=dropout,
-            attention_type=attention_type
+            attention_type=attention_type,
+            padding_idx=padding_idx,
         )
 
     def forward(self,

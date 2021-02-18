@@ -1,5 +1,4 @@
 # Train script
-import time
 import os
 import json
 import math
@@ -7,7 +6,6 @@ from pathlib import Path
 import pdb
 from typing import Union, List
 
-import numpy as np
 from tqdm.auto import tqdm
 import torch
 import torch.nn as nn
@@ -28,20 +26,17 @@ def cross_entropy_loss_fn(pad_token_id = None):
     
 class Seq2seqRNNTrainer:
 
-    def __init__(
-        self,
-        model: nn.Module,
-        train_dataloader: DataLoader,
-        val_dataloader: DataLoader,
-        learning_rate: float = 3e-4,
-        pad_token_id: int = None,
-        gradient_clip: float = 99999,
-        teacher_forcing: float = 0.0,
-        with_cuda: bool = True,
-        validate_every_n_sec: int = -1,
-
-        checkpoint_dir: Union[str, Path] = Path('./')
-    ):
+    def __init__(self,
+                 model,
+                 train_dataloader,
+                 val_dataloader,
+                 learning_rate: float = 3e-4,
+                 momentum: float = 0.9,
+                 pad_token_id = None,
+                 gradient_clip: float = 99999,
+                 teacher_forcing: float = 0.0,
+                 with_cuda: bool = True,
+                 checkpoint_dir: Union[str, Path] = Path('./')):
 
         cuda_condition = torch.cuda.is_available() and with_cuda
         self.device = torch.device('cuda' if cuda_condition else 'cpu')
@@ -58,7 +53,9 @@ class Seq2seqRNNTrainer:
 
         self.loss_fn = cross_entropy_loss_fn(pad_token_id)
         self.optimizer = Adam(model.parameters(), lr=learning_rate)
-
+        # self.optimizer = SGD(model.parameters(),
+                            #  lr=learning_rate, momentum=momentum)
+        
         self.lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer=self.optimizer,
             mode='min',
@@ -71,13 +68,14 @@ class Seq2seqRNNTrainer:
         # state variables
         self.min_test_loss = float('inf')
         self.min_test_perplexity = float('inf')
-        self.epoch = 0
+        self.n_epochs = 0
         
-        self.checkpoint_dir = Path(checkpoint_dir)
+        if isinstance(checkpoint_dir, str):
+            self.checkpoint_dir = Path(checkpoint_dir)
+        else:
+            self.checkpoint_dir = checkpoint_dir
         if not self.checkpoint_dir.exists():
             os.mkdir(self.checkpoint_dir)
-
-        self.validate_every_n_sec = validate_every_n_sec
 
         self.run_id = get_random_id()
 
@@ -87,137 +85,18 @@ class Seq2seqRNNTrainer:
     def update_lr(self, val_loss):
         self.lr_scheduler.step(val_loss, self.n_epochs)
 
-
-    def train(self, epochs):
-        """Adjusts model parameters using one batch of data from self.train_dataloader"""
-
-        self.ts = time.time()
-
-        self.model.train()
-
-        for epoch in range(epochs):
-
-            epoch_loss = 0
-            epoch_tgt_tokens = 0
-            n_batches = len(self.train_dataloader)
-            lr = self.get_learning_rate()
-            epoch_ts = time.time()
-
-            for batch_idx, batch in enumerate(self.train_dataloader, 1):
-
-                # forward step
-                src, src_len = batch.src
-                tgt_input, _ = batch.tgt
-                tgt_output_scores = self.model(
-                    src, src_len, tgt_input, teacher_forcing=0.0).to(self.device)
-
-                # compute loss
-                vocab_size = tgt_output_scores.shape[-1]
-                loss = self.loss_fn(tgt_output_scores.reshape(-1, vocab_size),
-                                    tgt_input[:, 1:].reshape(-1))
-
-                # count how many tokens are not the pad token
-                batch_tgt_tokens = (tgt_input[:, 1:] != self.pad_token_id).sum().item()
-                # loss normalized by the amount of tokens
-                batch_loss = loss.item() / batch_tgt_tokens
-                # definition of perplexity
-                batch_ppl = np.exp(batch_loss)
-                # print out batch metrics
-                print(f'Epoch {self.epoch} Batch: {batch_idx}/{n_batches} '
-                      f'Loss: {batch_loss:.4f} Perplexity: {batch_ppl:.2f} '
-                      f'lr: {lr:.4f}')
-
-                # update epoch level metrics
-                epoch_loss += loss.item()
-                epoch_tgt_tokens += batch_tgt_tokens
-
-                # backward step
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(),
-                                               self.gradient_clip)
-                self.optimizer.step()
-
-                # check if we need to run a validation loop
-                if (time.time() - self.ts) > self.validate_every_n_sec:
-                    # validation loop
-                    self.validate()
-
-                    # update clock
-                    self.ts = time.time()
-
-            epoch_loss = epoch_loss / epoch_tgt_tokens
-            ppl = np.exp(epoch_loss)
-
-            self.epoch += 1
-
-            # update learning rate
-            # TODO.
-
-            # pdb.set_trace()
-
-
-    def validate(self):
-        """Evaluates the model performance on the validation data
-        self.val_dataloader
-
-        It also prints examples of model responses, to get a qualitative measure
-        of how good the model is at talking.
-        """
-        print('Validating model performance...')
-
-        self.model.eval()
-
-        total_loss = 0
-        total_tgt_tokens = 0
-
-        for batch_idx, batch in enumerate(self.val_dataloader, 1):
-
-            # forward step
-            src, src_len = batch.src
-            tgt_input, _ = batch.tgt
-            tgt_output_scores = self.model(
-                src, src_len, tgt_input, teacher_forcing=0.0).to(self.device)
-
-            # compute loss
-            vocab_size = tgt_output_scores.shape[-1]
-            loss = self.loss_fn(
-                tgt_output_scores.reshape(-1, vocab_size),
-                tgt_input[:, 1:].reshape(-1)
-            )
-
-            # update loss and total number of tokens (excluding padding)
-            total_loss += loss.item()
-            total_tgt_tokens += (tgt_input[:, 1:] != self.pad_token_id).sum().item()
-
-        total_loss = total_loss / total_tgt_tokens
-        ppl = np.exp(total_loss)
-
-        print(f'Val loss: {total_loss:.4f}  Val perplexity: {ppl:.4f}')
-
-
-
     def train_test_loop(self, n_epochs):
-        """
 
-        :param n_epochs:
-        :return:
-        """
         for epoch in range(n_epochs):
 
             current_lr = self.get_learning_rate()
             print(f'Current LR: {current_lr}')
 
-            # adjust model parameters
-            train_loss, test_loss = self.train()
-
-            # check peformance on test data
-            test_loss, test_ppl = self.test()
-
-
+            train_loss, train_ppl = self.train(epoch)
+            test_loss, test_ppl = self.test(epoch)
 
             # print metrics to console
-            log = 'Epoch: {:03d}, Train loss: {:.4f}, Val loss: {:.4f}, Train ppl: {:.1f}, Val ppl: {:.1f} \n'
+            log = 'Epoch: {:03d}, Train loss: {:.4f}, Val loss: {:.4f}, Train ppl: {:.1f}, Val ppl: {:.1f}'
             print(log.format(epoch, train_loss, test_loss, train_ppl, test_ppl))
 
             # save checkpoint if test loss is lower than self.min_test_loss
@@ -232,14 +111,15 @@ class Seq2seqRNNTrainer:
             # update internal variable
             self.n_epochs += 1
 
-    # def train(self):
-    #     return self.iteration(self.train_dataloader, self.train_size)
-    #
-    # def test(self):
-    #     with torch.no_grad():
-    #         return self.iteration(self.val_dataloader, self.val_size, train=False)
+    def train(self, epoch):
+        return self.iteration(epoch, self.train_dataloader, self.train_size)
+    
+    def test(self, epoch):
+        with torch.no_grad():
+            return self.iteration(epoch, self.val_dataloader, self.val_size,
+                                  train=False)
 
-    def iteration(self, dataloader, dataset_size, train=True):
+    def iteration(self, epoch, dataloader, dataset_size, train=True):
         
         if train:
             self.model.train()
@@ -250,7 +130,7 @@ class Seq2seqRNNTrainer:
         total_tgt_tokens = 0
 
         # teacher_forcing = self.teacher_forcing if train else 0.0
-        # teacher_forcing = self.teacher_forcing
+        teacher_forcing = self.teacher_forcing
 
         with tqdm(total=dataset_size) as pbar:
 
@@ -263,7 +143,7 @@ class Seq2seqRNNTrainer:
                     src,
                     src_len,
                     tgt_input,
-                    teacher_forcing=0.0  # No teacher forcing.
+                    teacher_forcing=teacher_forcing
                 ).to(self.device)
 
                 # loss
