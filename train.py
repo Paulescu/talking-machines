@@ -38,8 +38,7 @@ class Seq2seqRNNTrainer:
         gradient_clip: float = 99999,
         teacher_forcing: float = 0.0,
         with_cuda: bool = True,
-        validate_every_n_sec: int = -1,
-
+        validate_every_n_sec: int = 600,
         checkpoint_dir: Union[str, Path] = Path('./')
     ):
 
@@ -142,9 +141,10 @@ class Seq2seqRNNTrainer:
                 if (time.time() - self.ts) > self.validate_every_n_sec:
                     # validation loop
                     self.validate()
-
                     # update clock
                     self.ts = time.time()
+                    # set train mode
+                    self.model.train()
 
             epoch_loss = epoch_loss / epoch_tgt_tokens
             ppl = np.exp(epoch_loss)
@@ -156,7 +156,7 @@ class Seq2seqRNNTrainer:
 
             # pdb.set_trace()
 
-
+    @torch.no_grad()
     def validate(self):
         """Evaluates the model performance on the validation data
         self.val_dataloader
