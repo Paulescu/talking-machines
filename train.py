@@ -38,7 +38,9 @@ class Seq2seqRNNTrainer:
         gradient_clip: float = 99999,
         teacher_forcing: float = 0.0,
         with_cuda: bool = True,
-        validate_every_n_sec: int = 600,
+
+        log_every_n_steps: int = 10,
+        validate_every_n_steps: int = 30,
         checkpoint_dir: Union[str, Path] = Path('./')
     ):
 
@@ -71,12 +73,15 @@ class Seq2seqRNNTrainer:
         self.min_test_loss = float('inf')
         self.min_test_perplexity = float('inf')
         self.epoch = 0
-        
+        self.global_steps = 0
+
         self.checkpoint_dir = Path(checkpoint_dir)
         if not self.checkpoint_dir.exists():
             os.mkdir(self.checkpoint_dir)
 
-        self.validate_every_n_sec = validate_every_n_sec
+        self.log_every_n_steps = log_every_n_steps
+        # self.validate_every_n_sec = validate_every_n_sec
+        self.validate_every_n_steps = validate_every_n_steps
 
         self.run_id = get_random_id()
 
@@ -90,7 +95,7 @@ class Seq2seqRNNTrainer:
     def train(self, epochs):
         """Adjusts model parameters using one batch of data from self.train_dataloader"""
 
-        self.ts = time.time()
+        # self.ts = time.time()
 
         self.model.train()
 
@@ -104,11 +109,14 @@ class Seq2seqRNNTrainer:
 
             for batch_idx, batch in enumerate(self.train_dataloader, 1):
 
+                self.global_steps += 1
+                
                 # forward step
                 src, src_len = batch.src
                 tgt_input, _ = batch.tgt
                 tgt_output_scores = self.model(
-                    src, src_len, tgt_input, teacher_forcing=0.0).to(self.device)
+                    src, src_len, tgt_input, teacher_forcing=self.teacher_forcing
+                ).to(self.device)
 
                 # compute loss
                 vocab_size = tgt_output_scores.shape[-1]
@@ -122,9 +130,10 @@ class Seq2seqRNNTrainer:
                 # definition of perplexity
                 batch_ppl = np.exp(batch_loss)
                 # print out batch metrics
-                print(f'Epoch {self.epoch} Batch: {batch_idx}/{n_batches} '
-                      f'Loss: {batch_loss:.4f} Perplexity: {batch_ppl:.2f} '
-                      f'lr: {lr:.4f}')
+                if (self.global_steps % self.log_every_n_steps) == 0:
+                    print(f'Epoch {self.epoch} Batch: {batch_idx}/{n_batches} '
+                          f'Loss: {batch_loss:.4f} Perplexity: {batch_ppl:.2f} '
+                          f'lr: {lr:.4f} teacher_forcing: {self.teacher_forcing:.2f}')
 
                 # update epoch level metrics
                 epoch_loss += loss.item()
@@ -138,11 +147,12 @@ class Seq2seqRNNTrainer:
                 self.optimizer.step()
 
                 # check if we need to run a validation loop
-                if (time.time() - self.ts) > self.validate_every_n_sec:
+                # if (time.time() - self.ts) > self.validate_every_n_sec:
+                if (self.global_steps % self.validate_every_n_steps) == 0:
                     # validation loop
                     self.validate()
-                    # update clock
-                    self.ts = time.time()
+                    # # update clock
+                    # self.ts = time.time()
                     # set train mode
                     self.model.train()
 
