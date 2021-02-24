@@ -58,7 +58,9 @@ class Seq2seqRNNTrainer:
         self.val_size = get_dataset_size(self.val_dataloader)
 
         self.loss_fn = cross_entropy_loss_fn(pad_token_id)
+
         self.optimizer = Adam(model.parameters(), lr=learning_rate)
+
 
         self.lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer=self.optimizer,
@@ -109,8 +111,6 @@ class Seq2seqRNNTrainer:
 
             for batch_idx, batch in enumerate(self.train_dataloader, 1):
 
-                self.global_steps += 1
-                
                 # forward step
                 src, src_len = batch.src
                 tgt_input, _ = batch.tgt
@@ -155,6 +155,8 @@ class Seq2seqRNNTrainer:
                     # self.ts = time.time()
                     # set train mode
                     self.model.train()
+
+                self.global_steps += 1
 
             epoch_loss = epoch_loss / epoch_tgt_tokens
             ppl = np.exp(epoch_loss)

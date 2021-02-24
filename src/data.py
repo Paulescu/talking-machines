@@ -9,10 +9,12 @@ from typing import (
 from pathlib import Path
 import pickle
 import wget
+import codecs
 import pdb
 
+from nltk.tokenize.treebank import TreebankWordTokenizer
+from tqdm.auto import tqdm
 import pandas as pd
-import spacy
 import torch
 from torchtext.data import (
     Field,
@@ -20,16 +22,12 @@ from torchtext.data import (
     TabularDataset,
     BucketIterator
 )
-# from torchtext.data.utils import get_tokenizer
 from torchtext.data.utils import interleave_keys
+from torchtext.data import Field
 from torchtext.vocab import Vocab
 from autocorrect import Speller
-from tqdm.auto import tqdm
 
 
-# from .vocab import WordVocab
-# from .tokenizer import tokenizer
-# from .constants import *
 
 # special tokens
 BOS_TOKEN = "<BOS>"
@@ -37,23 +35,31 @@ EOS_TOKEN = "<EOS>"
 PAD_TOKEN = "<PAD>"
 UNK_TOKEN = "<UNK>"
 
-DATASETS = {
-    'convai': 'https://raw.githubusercontent.com/DeepPavlov/convai/master/data/export_2018-07-07_train.json',
-    'personachat': 'https://s3.amazonaws.com/datasets.huggingface.co/personachat/personachat_self_original.json',
-}
-
-# NEW stuff start
-import codecs
+WORD_TOKENIZER = TreebankWordTokenizer()
 
 def generate_file_with_sentence_pairs(
     input_file: Path,
     output_file: Path,
     n_past_utterances: int = 0,
+    include_other_speaker: bool = True,
     autocorrect: bool = False,
 ):
+    """Generate examples we can use to train the ML models.
 
+    Each example is a pair of (source_sentence, target_sentence), where
+
+    source_sentence is the conversation history
+    target_sentence is the next utterance in the conversation.
+
+    The parameter n_past_utterances controls how far in the past we look to
+    built the source_sentence.
+
+    """
     pairs = list()
     past_utterances = []
+    prev_src_sentence = None
+    prev_tgt_sentence = None
+    past_utterances_other_speaker = []
 
     with codecs.open(input_file, 'r', 'utf-8', errors='ignore') as f:
 
@@ -74,47 +80,45 @@ def generate_file_with_sentence_pairs(
             if line_id == 1:
                 # no history
                 past_utterances = [src_sentence]
+                past_utterances_other_speaker = []
             else:
                 # append history
                 past_utterances.append(src_sentence)
-
-            # if previous_target_line is not None:
-            #
-            #     pdb.set_trace()
-            #
-            #     # store pair (source, target) from previous iteration
-            #     pairs.append([previous_target_line, source_line])
+                past_utterances_other_speaker.append(prev_src_sentence)
+                past_utterances_other_speaker.append(prev_tgt_sentence)
 
             # store pair (source, target) from this iteration
-            # past_utterances.append(source_line)
             conversation_history = ' '.join(past_utterances[-n_past_utterances:])
             pairs.append([conversation_history, tgt_sentence])
+
+            if include_other_speaker:
+                if past_utterances_other_speaker:
+                    # add conversation from the other speaker's perspective
+                    conversation_history = ' '.join(
+                        past_utterances_other_speaker[-n_past_utterances:])
+                    pairs.append([conversation_history, src_sentence])
 
             # update 'past_utterances' for the next loop iteration
             past_utterances.append(tgt_sentence)
 
-            # if line_id == 7:
-            #     break
+            prev_src_sentence = src_sentence
+            prev_tgt_sentence = tgt_sentence
 
     pd.DataFrame(pairs).to_csv(output_file, index=False, header=False)
-    print(f'Generated {output_file}')
+    print(f'Generated {output_file}, {len(pairs):,} examples')
 
-    # df =  pd.DataFrame(pairs)
-    # pdb.set_trace()
-
-
-from nltk.tokenize.treebank import TreebankWordTokenizer
-word_tokenizer = TreebankWordTokenizer()
 
 def tokenizer(sentence):
-    return word_tokenizer.tokenize(sentence)
+    """Tokenizer function we use for all models"""
+    return WORD_TOKENIZER.tokenize(sentence)
+
 
 def get_sentence_processor(
-        train_file: Path,
-        min_word_freq : int = 3,
-        max_vocab_size: int = 10000,
-        use_glove_vectors: bool = False,
-        vectors_cache: Path = None,
+    train_file: Path,
+    min_word_freq : int = 1,
+    max_vocab_size: int = 20000,
+    glove_vectors: str = 'glove.6B.300d',
+    vectors_cache: Path = None,
 ) -> Field:
     """"""
     sentence_processor = Field(
@@ -135,13 +139,13 @@ def get_sentence_processor(
         fields=fields,
     )
 
-    if use_glove_vectors:
+    if glove_vectors:
         # vocabulary from GloVe
         sentence_processor.build_vocab(
             train_ds,
             min_freq=min_word_freq,
             max_size=max_vocab_size,
-            vectors='glove.6B.300d',
+            vectors=glove_vectors,
             vectors_cache=vectors_cache,
         )
     else:
@@ -153,206 +157,6 @@ def get_sentence_processor(
         )
 
     return sentence_processor
-
-# NEW stuff end
-
-def download_data(dataset: str, destination_dir: str):
-    """
-    Downloads the initial dataset from remote URL
-    """
-    def bar_progress(current, total, width=80):
-        """Auxiliary function to print progress bar while downloading"""
-        progress_message = "Downloading: %d%% [%d / %d] bytes" % (current / total * 100, current, total)
-        # Don't use print() as it will print in new line every time.
-        sys.stdout.write("\r" + progress_message)
-        sys.stdout.flush()
-
-    url = DATASETS[dataset]
-    print(f'Downloading from {url}...')
-    destination_file = str(Path(destination_dir) / url.split('/')[-1])
-    wget.download(url, destination_file, bar=bar_progress)
-
-
-def load_raw_data(file: Union[str, Path]) -> Tuple[List, List]:
-    """
-    Returns training data and test data lists
-    """
-    with open(file) as json_file:
-        data = json.load(json_file)
-    return data['train'], data['valid']
-
-def get_vocab(
-        train_file: Path,
-        min_word_freq : int = 3,
-        use_glove_vectors: bool = False
-) -> Vocab:
-    """"""
-    sentence_processor = Field(
-        tokenize=tokenizer,
-        init_token=BOS_TOKEN,
-        eos_token=EOS_TOKEN,
-        pad_token=PAD_TOKEN,
-        batch_first=True,
-        include_lengths=True,
-        lower=True,
-    )
-    fields = [('id', None),
-              ('src', sentence_processor), ('tgt', sentence_processor)]
-    train_ds = TabularDataset(
-        path=train_file,
-        format='csv',
-        skip_header=False,
-        fields=fields,
-    )
-
-    if use_glove_vectors:
-        # vocabulary from GloVe
-        sentence_processor.build_vocab(
-            train_ds,
-            min_freq=min_word_freq,
-            vectors='glove.6B.100d'
-        )
-    else:
-        # new vocabulary from scratch
-        sentence_processor.build_vocab(
-            train_ds, min_freq=min_word_freq)
-
-    return sentence_processor.vocab
-
-
-from torchtext.data import Field
-
-def get_torchtext_field(
-        train_file: Path,
-        min_word_freq : int = 3,
-        max_vocab_size: int = 10000,
-        use_glove_vectors: bool = False,
-        vectors_cache: Path = None,
-) -> Field:
-    """"""
-    sentence_processor = Field(
-        tokenize=tokenizer,
-        init_token=BOS_TOKEN,
-        eos_token=EOS_TOKEN,
-        pad_token=PAD_TOKEN,
-        batch_first=True,
-        include_lengths=True,
-        lower=True,
-    )
-    fields = [('id', None),
-              ('src', sentence_processor),
-              ('tgt', sentence_processor)]
-
-    train_ds = TabularDataset(
-        path=train_file,
-        format='csv',
-        skip_header=False,
-        fields=fields,
-    )
-
-    if use_glove_vectors:
-        # vocabulary from GloVe
-        sentence_processor.build_vocab(
-            train_ds,
-            min_freq=min_word_freq,
-            max_size=max_vocab_size,
-            vectors='glove.6B.100d',
-            vectors_cache=vectors_cache,
-        )
-    else:
-        # new vocabulary from scratch
-        sentence_processor.build_vocab(
-            train_ds,
-            min_freq=min_word_freq,
-            max_size=max_vocab_size,
-        )
-
-    return sentence_processor
-
-def generate_train_val_test_files(
-        raw_data_file: Path,
-        names: Tuple[str] = ('train.csv', 'val.csv', 'test.csv'),
-        autocorrect=False,
-        n_utterances_history=99999
-):
-    """
-    Generates 3 CSV files: train, validation, test.
-    """
-    train_data, test_data = load_raw_data(raw_data_file)
-
-    # build sentence pairs (context, next_utterance) from raw data
-    train_pairs = build_sentence_pairs_from_raw_data(
-        train_data,
-        autocorrect=autocorrect,
-        n_utterances_history=n_utterances_history
-    )
-    print(f'Train set {len(train_pairs):,}')
-    
-    test_pairs = build_sentence_pairs_from_raw_data(
-        test_data,
-        autocorrect=autocorrect,
-        n_utterances_history=n_utterances_history
-    )
-    print(f'Test set {len(test_pairs):,}')
-
-    # save sentence pairs into train, validation and test CSV files
-    train_file = Path(raw_data_file).resolve().parent / names[0]
-    pd.DataFrame(train_pairs[:-10000]).to_csv(train_file, index=False,
-                                              header=False) # .sample(frac=1)
-    print(f'Saved {train_file}')
-
-    val_file = Path(raw_data_file).resolve().parent / names[1]
-    pd.DataFrame(train_pairs[-10000:]).to_csv(val_file, index=False,
-                                              header=False)
-    print(f'Saved {val_file}')
-
-    test_file = Path(raw_data_file).resolve().parent / names[2]
-    pd.DataFrame(test_pairs).to_csv(test_file, index=False, header=False)   
-    print(f'Saved {test_file}')
-
-
-def build_sentence_pairs_from_raw_data(
-        conversations: List,
-        autocorrect=False,
-        n_utterances_history=99999
-):
-    """
-    Returns list of pairs (context, next_utterance) from the raw json file
-    'conversations'
-    """
-    pairs = []
-    removed = 0
-    spell = Speller(fast=True)
-
-    for id, conversation in enumerate(tqdm(conversations)):
-
-        for utterance in conversation['utterances']:
-            next_utterance = utterance['candidates'][-1]
-            past_utterances = utterance['history'][-n_utterances_history:]
-
-            if not past_utterances:
-                # no past utterances, skip
-                continue
-
-            if past_utterances[0] == '__ SILENCE __':
-                history = ' '.join(past_utterances[1:])
-            else:
-                history = ' '.join(past_utterances)
-
-            # if id == 13980:
-            #     pdb.set_trace()
-            if history == '':
-                continue
-
-            if autocorrect:
-                next_utterance = spell(next_utterance)
-                history = spell(history)
-
-            pairs.append([id, history, next_utterance])
-            # pairs.append([history, next_utterance])
-
-    print(f'{removed:,} lines removed')
-    return pairs
 
 
 def get_datasets_and_vocab(
@@ -448,12 +252,12 @@ def get_datasets_and_vocab(
 
 
 def get_datasets(
-        path: Path,
-        train: str,
-        val: str,
-        test: str,
-        sentence_processor: Field,
-        train_size: int = None,
+    path: Path,
+    train: str,
+    val: str,
+    test: str,
+    sentence_processor: Field,
+    train_size: int = None,
 ) -> Tuple[Dataset, Dataset, Dataset]:
     """
     Load and return PyTorch Datasets train, validation, test sets.
@@ -493,13 +297,21 @@ def get_datasets(
 
     return train_ds, val_ds, test_ds
 
+
 def get_dataloaders(
     train_dataset: Dataset,
     val_dataset: Dataset,
     test_dataset: Dataset,
-    batch_size: int = 2400,
+    n_examples_per_batch: int = None,
+    n_tokens_per_batch: int = None,
     device = None
 ) -> Tuple[BucketIterator, BucketIterator, BucketIterator]:
+
+    # validate inputs
+    if n_examples_per_batch and n_tokens_per_batch:
+        raise Exception('You cannot set both n_examples_per_batch and n_tokens_per_batch')
+    if not n_examples_per_batch and not n_tokens_per_batch:
+        raise Exception('You have to set either n_examples_per_batch or n_tokens_per_batch')
 
     if not device:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -536,36 +348,23 @@ def get_dataloaders(
 
         return max(num_of_tokens_in_src_tensor, num_of_tokens_in_tgt_tensor)
 
-    train_iter, val_iter, test_iter = BucketIterator.splits(
-        (train_dataset, val_dataset, test_dataset),
-        batch_size=batch_size,
-        device=device,
-        sort_key=sort_key,
-        sort_within_batch=True,
-        # batch_size_fn=batch_size_fn,
-    )
+    if n_examples_per_batch:
+        train_iter, val_iter, test_iter = BucketIterator.splits(
+            (train_dataset, val_dataset, test_dataset),
+            batch_size=n_examples_per_batch,
+            device=device,
+            sort_key=sort_key,
+            sort_within_batch=True)
 
-    # pdb.set_trace()
+    elif n_tokens_per_batch:
+        train_iter, val_iter, test_iter = BucketIterator.splits(
+            (train_dataset, val_dataset, test_dataset),
+            batch_size=n_tokens_per_batch,
+            device=device,
+            sort_key=sort_key,
+            sort_within_batch=True,
+            batch_size_fn=batch_size_fn)
+    else:
+        raise Exception('')
 
     return train_iter, val_iter, test_iter
-
-
-from torchtext.vocab import Vocab
-def preprocess_sentence(self, sentence: str, vocab: Vocab):
-    """
-    TODO
-    """
-    # lowercase sentence
-    sentence = sentence.lower()
-
-    # tokenize
-    tokens = self.tokenizer_fn(sentence)
-
-    # numericalize
-    output = [BOS_TOKEN]
-    output += [self.vocab.stoi[t] for t in tokens]
-    output += [EOS_TOKEN]
-
-    return output
-
-
