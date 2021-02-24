@@ -7,8 +7,6 @@ from typing import (
     Union
 )
 from pathlib import Path
-import pickle
-import wget
 import codecs
 import pdb
 
@@ -26,7 +24,6 @@ from torchtext.data.utils import interleave_keys
 from torchtext.data import Field
 from torchtext.vocab import Vocab
 from autocorrect import Speller
-
 
 
 # special tokens

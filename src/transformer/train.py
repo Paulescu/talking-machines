@@ -84,7 +84,7 @@ class TransformerTrainer:
             test_loss = self.test()
 
             # print train/test losses
-            log = 'Epoch: {:03d}, Train loss: {:.4f}, Val loss: {:.4f}'
+            log = '\nEpoch: {:03d}, Train loss: {:.4f}, Val loss: {:.4f}'
             print(log.format(epoch, train_loss, test_loss))
             print(''.join(['-']*80))
 
