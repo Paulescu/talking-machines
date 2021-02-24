@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 import pdb
 
@@ -86,9 +87,15 @@ class TransformerTrainer:
             # print train/test losses
             log = '\nEpoch: {:03d}, Train loss: {:.4f}, Val loss: {:.4f}'
             print(log.format(epoch, train_loss, test_loss))
-            print(''.join(['-']*80))
+
+            # save checkpoint if test loss is lower than self.min_test_loss
+            if test_loss < self.min_test_loss:
+                self.min_test_loss = test_loss
+                self.save()
 
             self.epochs += 1
+
+            print(''.join(['-'] * 80))
 
     def train(self):
         """One-epoch training"""
@@ -229,6 +236,48 @@ class TransformerTrainer:
 
         return loss
 
+    def save(self):
+
+        # save trainer state
+        state = {
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'epochs': self.epochs,
+            'min_test_loss': self.min_test_loss,
+            'min_test_perplexity': self.min_test_perplexity,
+        }
+        dir = self.checkpoint_dir / f'{self.run_id}'
+        if not dir.exists():
+            os.mkdir(dir)
+        file = dir / f'{self.epochs}.ckpt'
+        torch.save(state, file)
+        print(f'{file} was saved')
+
+        # save model hyperparameters
+        json_file = dir / f'params.json'
+        with open(json_file, 'w') as f:
+            json.dump(self.model.hyperparams, f)
+        print(f'{json_file} file was saved')
+
+    def load(self, run_id, epoch=None):
+
+        checkpoint_dir = self.checkpoint_dir / run_id
+        if epoch:
+            checkpoint_file = checkpoint_dir / f'{epoch}.ckpt'
+        else:
+            # load latest checkpoint
+            raise Exception('Not implemented')
+            checkpoint_file = get_latest_checkpoint_file(checkpoint_dir)
+
+        # set state
+        state = torch.load(checkpoint_file)
+        self.model.load_state_dict(state['model_state_dict'])
+        self.model.to(self.device)
+        self.optimizer.load_state_dict(state['optimizer_state_dict'])
+        self.epochs = int(state['epochs'])
+        self.min_test_loss = float(state['min_test_loss'])
+        # self.min_test_perplexity = float(state['min_test_perplexity'])
+        self.run_id = run_id
 
     def _print_examples(self, src, tgt, predictions, n_examples=3):
         """
