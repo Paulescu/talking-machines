@@ -1,17 +1,15 @@
 import json
-import sys
 import os
 from typing import (
     Tuple,
     List,
-    Union
 )
 from pathlib import Path
 import codecs
 import pdb
 
-from nltk.tokenize.treebank import TreebankWordTokenizer
-from tqdm.auto import tqdm
+# from nltk.tokenize.treebank import TreebankWordTokenizer
+# from tqdm.auto import tqdm
 import pandas as pd
 import torch
 from torchtext.data import (
@@ -22,9 +20,11 @@ from torchtext.data import (
 )
 from torchtext.data.utils import interleave_keys
 from torchtext.data import Field
-from torchtext.vocab import Vocab
-from autocorrect import Speller
+# from torchtext.vocab import Vocab
+# from autocorrect import Speller
 
+# from .util import pprint
+from .tokenizer import tokenizer
 
 # special tokens
 BOS_TOKEN = "<BOS>"
@@ -32,35 +32,46 @@ EOS_TOKEN = "<EOS>"
 PAD_TOKEN = "<PAD>"
 UNK_TOKEN = "<UNK>"
 
-WORD_TOKENIZER = TreebankWordTokenizer()
 
-def generate_file_with_sentence_pairs(
+def generate_file_with_training_examples(
     input_file: Path,
     output_file: Path,
     n_past_utterances: int = 0,
-    include_other_speaker: bool = True,
+    # include_persona: bool = False,
+    include_partner: bool = False,
     autocorrect: bool = False,
 ):
-    """Generate examples we can use to train the ML models.
+    """Generates a json file with examples we can use to train ML models.
 
-    Each example is a pair of (source_sentence, target_sentence), where
+    Each example is a dictionary with keys:
+    {
+        'persona': ...,
+        'src': ...,
+        'target': ...
+    }
 
-    source_sentence is the conversation history
-    target_sentence is the next utterance in the conversation.
-
-    The parameter n_past_utterances controls how far in the past we look to
-    built the source_sentence.
+    Args:
+        input_file:
+        output_file:
+        n_past_utterances:
+        include_persona:
+        include_partner:
+        include_other_speaker:
+        autocorrect:
 
     """
-    pairs = list()
-    past_utterances = []
-    prev_src_sentence = None
-    prev_tgt_sentence = None
-    past_utterances_other_speaker = []
+    YOUR_PERSONA_STR = "your persona: "
+    PARTNERS_PERSONA_STR = "partner's persona: "
+
+    your_persona = []
+    partners_persona = []
+    your_history = []
+    partners_history = []
+    examples = []
 
     with codecs.open(input_file, 'r', 'utf-8', errors='ignore') as f:
 
-        for line in f:
+        for idx, line in enumerate(f):
 
             # each line starts as an integer followed by a space.
             # e.g. 1 bla bla bla
@@ -71,49 +82,90 @@ def generate_file_with_sentence_pairs(
             line_id = int(line[:position_first_space])
             line = line[position_first_space + 1:]
 
-            # extract source, target sentences
-            src_sentence, tgt_sentence, _, _ = line.split('\t')
-
             if line_id == 1:
-                # no history
-                past_utterances = [src_sentence]
-                past_utterances_other_speaker = []
+                your_persona = []
+                partners_persona = []
+                your_history = []
+                partners_history = []
+                prev_partners_utterance = None
+
+            if line.startswith(YOUR_PERSONA_STR):
+                # your persona description
+                your_persona.append(line[len(YOUR_PERSONA_STR):])
+                # continue
+
+            elif line.startswith(PARTNERS_PERSONA_STR):
+                # partners persona description
+                partners_persona.append(line[len(PARTNERS_PERSONA_STR):])
+                # continue
+
             else:
-                # append history
-                past_utterances.append(src_sentence)
-                past_utterances_other_speaker.append(prev_src_sentence)
-                past_utterances_other_speaker.append(prev_tgt_sentence)
+                # extract source, target sentences
+                partners_utterance, your_reply, _, _ = line.split('\t')
+                your_history.append(partners_utterance)
 
-            # store pair (source, target) from this iteration
-            conversation_history = ' '.join(past_utterances[-n_past_utterances:])
-            pairs.append([conversation_history, tgt_sentence])
+                examples.append({
+                    'persona': ' '.join(your_persona),
+                    'src': ' '.join(your_history[-n_past_utterances:]),
+                    'tgt': your_reply,
+                })
+                your_history.append(your_reply)
 
-            if include_other_speaker:
-                if past_utterances_other_speaker:
-                    # add conversation from the other speaker's perspective
-                    conversation_history = ' '.join(
-                        past_utterances_other_speaker[-n_past_utterances:])
-                    pairs.append([conversation_history, src_sentence])
+                if prev_partners_utterance and include_partner:
+                    partners_history.append(prev_partners_utterance)
+                    partners_history.append(prev_your_reply)
 
-            # update 'past_utterances' for the next loop iteration
-            past_utterances.append(tgt_sentence)
+                    examples.append({
+                        'persona': ' '.join(partners_persona),
+                        'src': ' '.join(partners_history[-n_past_utterances:]),
+                        'tgt': partners_utterance,
+                    })
 
-            prev_src_sentence = src_sentence
-            prev_tgt_sentence = tgt_sentence
+                prev_partners_utterance, prev_your_reply = partners_utterance, your_reply
 
-    pd.DataFrame(pairs).to_csv(output_file, index=False, header=False)
-    print(f'Generated {output_file}, {len(pairs):,} examples')
+            # if (idx > 0) and (line_id == 1):
+            #     pprint(examples)
+            #     break
+
+    load_list_dicts_from_file()
 
 
-def tokenizer(sentence):
-    """Tokenizer function we use for all models"""
-    return WORD_TOKENIZER.tokenize(sentence)
+    print(f'Generated {output_file}, {len(examples):,} examples')
+
+
+def load_list_dicts_from_file(
+    file: str,
+    n_elements: int = None,
+) -> List[dict]:
+
+    list_dicts = []
+    counter = 0
+    with open(file, 'r', encoding='utf-8') as f:
+        for line in f:
+            list_dicts.append(json.loads(line))
+            counter += 1
+            if n_elements and (counter >= n_elements):
+                break
+
+    return list_dicts
+
+def save_list_dicts_to_file(
+    list_dicts: List[dict],
+    file: str,
+):
+    with open(file, 'w', encoding='utf-8') as f:
+
+        # json.dump(examples, f)
+        for ex in list_dicts:
+            json.dump(ex, f)
+            f.write('\n')
 
 
 def get_sentence_processor(
     train_file: Path,
     min_word_freq : int = 1,
     max_vocab_size: int = 20000,
+    use_persona_info: bool = False,
     glove_vectors: str = 'glove.6B.300d',
     vectors_cache: Path = None,
 ) -> Field:
@@ -126,16 +178,31 @@ def get_sentence_processor(
         batch_first=True,
         include_lengths=True,
         lower=True,
-    )
-    fields = [('src', sentence_processor), ('tgt', sentence_processor)]
 
+    )
+
+    if use_persona_info:
+        # fields = [('persona', sentence_processor),
+        #           ('src', sentence_processor), ('tgt', sentence_processor)]
+        fields = {
+            'persona': ('persona', sentence_processor),
+            'src': ('src', sentence_processor),
+            'tgt': ('tgt', sentence_processor),
+        }
+    else:
+        # fields = [('src', sentence_processor), ('tgt', sentence_processor)]
+        fields = {
+            'src': ('src', sentence_processor),
+            'tgt': ('tgt', sentence_processor),
+        }
+
+    # pdb.set_trace()
     train_ds = TabularDataset(
         path=train_file,
-        format='csv',
-        skip_header=False,
+        format='json',
         fields=fields,
     )
-
+    # pdb.set_trace()
     if glove_vectors:
         # vocabulary from GloVe
         sentence_processor.build_vocab(
@@ -157,14 +224,14 @@ def get_sentence_processor(
 
 
 def get_datasets_and_vocab(
-        path_to_files,
-        train,
-        validation,
-        test,
-        train_size: int = None,
-        validation_size: int = None,
-        use_glove_vectors: bool = False,
-        vectors_cache: str = None,
+    path_to_files,
+    train,
+    validation,
+    test,
+    train_size: int = None,
+    validation_size: int = None,
+    use_glove_vectors: bool = False,
+    vectors_cache: str = None,
 ) -> Tuple[Dataset, Dataset, Dataset]:
     """
     Load and return PyTorch Datasets train, validation, test sets.
@@ -178,11 +245,21 @@ def get_datasets_and_vocab(
 
     if train_size:
         # generate a temporal smaller version of the train set
-        new_train_path = os.path.join(path_to_files, f'train_{train_size}.csv')
+        new_train_path = os.path.join(path_to_files, f'train_{train_size}.json')
+
+
+        pdb.set_trace()
+
         pd.read_csv(train_path, header=None) \
             .head(train_size) \
             .to_csv(new_train_path, index=False, header=None)
         # train_path = new_train_path
+
+        # TODO
+
+
+
+
     else:
         new_train_path = train_path
 
@@ -255,6 +332,7 @@ def get_datasets(
     test: str,
     sentence_processor: Field,
     train_size: int = None,
+    use_persona_info: bool = False,
 ) -> Tuple[Dataset, Dataset, Dataset]:
     """
     Load and return PyTorch Datasets train, validation, test sets.
@@ -268,14 +346,27 @@ def get_datasets(
 
     if train_size:
         # generate a temporal smaller version of the train set
-        new_train_path = os.path.join(path, f'train_{train_size}.csv')
-        pd.read_csv(train_path, header=None) \
-            .head(train_size) \
-            .to_csv(new_train_path, index=False, header=None)
+        new_train_path = os.path.join(path, f'train_{train_size}.json')
+
+        save_list_dicts_to_file(
+            load_list_dicts_from_file(train_path, n_elements=train_size),
+            file=new_train_path
+        )
 
         train_path = new_train_path
 
-    fields = [('src', sentence_processor), ('tgt', sentence_processor)]
+    if use_persona_info:
+        fields = {
+            'persona': ('persona', sentence_processor),
+            'src': ('src', sentence_processor),
+            'tgt': ('tgt', sentence_processor),
+        }
+    else:
+        # fields = [('src', sentence_processor), ('tgt', sentence_processor)]
+        fields = {
+            'src': ('src', sentence_processor),
+            'tgt': ('tgt', sentence_processor),
+        }
 
     # generate potentially smaller datasets
     train_ds, val_ds, test_ds = TabularDataset.splits(
@@ -283,8 +374,7 @@ def get_datasets(
         train=train_path,
         validation=val_path,
         test=test_path,
-        format='csv',
-        skip_header=False,
+        format='json',
         fields=fields,
     )
 
@@ -321,6 +411,7 @@ def get_dataloaders(
         Heuristic that helps the BucketIterator group examples that have
         similar length, and minimize padding
         """
+        # TODO: take into account ex.persona
         return interleave_keys(len(ex.src), len(ex.tgt))
 
     def batch_size_fn(new_example, count, sofar):

@@ -7,7 +7,7 @@ import uuid
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from .data import tokenizer
+# from .data import tokenizer
 
 def save_vocab(vocab, path: Union[Path, str]):
     """Saves vocab to disk"""

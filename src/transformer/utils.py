@@ -76,23 +76,63 @@ class LabelSmoothingDistribution(nn.Module):
         return smooth_target_distributions
 
 
-def get_src_and_trg_batches(token_ids_batch):
+# def get_src_and_trg_batches(token_ids_batch):
 
 
-    src_token_ids_batch, _ = token_ids_batch.src
-    trg_token_ids_batch, _ = token_ids_batch.tgt
+#     src_token_ids_batch, _ = token_ids_batch.src
+#     trg_token_ids_batch, _ = token_ids_batch.tgt
+
+#     # Target input should be shifted by 1 compared to the target output tokens
+#     # Example: if we had a sentence like: [<s>,what,is,up,</s>] then to train the NMT model what we do is we pass
+#     # [<s>,what,is,up] to the input as set [what,is,up,</s>] as the expected output.
+#     trg_token_ids_batch_input = trg_token_ids_batch[:, :-1]
+
+#     # We reshape from (B, S) into (BxS, 1) as that's the the shape expected by LabelSmoothing which will produce
+#     # the shape (BxS, V) where V is the target vocab size which is the same shape as the one that comes out
+#     # from the transformer so we can directly pass them into the KL divergence loss
+#     trg_token_ids_batch_gt = trg_token_ids_batch[:, 1:].reshape(-1, 1)
+
+#     return src_token_ids_batch, trg_token_ids_batch_input, trg_token_ids_batch_gt
+
+def get_src_and_trg_batches(batch):
+
+    batch_fields_are_tuples = True if isinstance(batch.src, tuple) else False
+
+    if batch_fields_are_tuples:       
+        history_token_ids, _ = batch.src
+        tgt_token_ids, _ = batch.tgt
+    else:
+        history_token_ids = batch.src
+        tgt_token_ids = batch.tgt
+
+    # check if batch contains 'persona' field. It it does, we concatenate
+    # the 'persona' and 'history' tensors.
+    if hasattr(batch, 'persona'):
+        if batch_fields_are_tuples:       
+            persona_token_ids, _ = batch.persona
+        else:
+            persona_token_ids = batch.persona
+        # concatenate tensors        
+        src_token_ids = torch.cat([persona_token_ids, history_token_ids], dim=1)
+    
+    else:
+        src_token_ids = history_token_ids
+
+    # src_token_ids_batch, _ = batch.src
+    # trg_token_ids_batch, _ = batch.tgt
 
     # Target input should be shifted by 1 compared to the target output tokens
     # Example: if we had a sentence like: [<s>,what,is,up,</s>] then to train the NMT model what we do is we pass
     # [<s>,what,is,up] to the input as set [what,is,up,</s>] as the expected output.
-    trg_token_ids_batch_input = trg_token_ids_batch[:, :-1]
+    tgt_token_ids_input = tgt_token_ids[:, :-1]
 
     # We reshape from (B, S) into (BxS, 1) as that's the the shape expected by LabelSmoothing which will produce
     # the shape (BxS, V) where V is the target vocab size which is the same shape as the one that comes out
     # from the transformer so we can directly pass them into the KL divergence loss
-    trg_token_ids_batch_gt = trg_token_ids_batch[:, 1:].reshape(-1, 1)
+    tgt_token_ids_output = tgt_token_ids[:, 1:].reshape(-1, 1)
 
-    return src_token_ids_batch, trg_token_ids_batch_input, trg_token_ids_batch_gt
+    return src_token_ids, tgt_token_ids_input, tgt_token_ids_output
+
 
 def get_masks_and_count_tokens_src(src_token_ids_batch, pad_token_id):
     batch_size = src_token_ids_batch.shape[0]

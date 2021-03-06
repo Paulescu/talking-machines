@@ -1,3 +1,16 @@
+# WIP
+
+- [x] Start transformer based chatbot.
+- [x] Extend data utils to load persona info too.
+
+- [x] Implement data ingestion to include 'persona'
+- [ ] and think about the functions that generate the masks.
+
+- [ ] BucketIterator.sort_key() to take into accoutn ex.persona
+- [ ] Rename: src -> history, tgt -> response.
+
+------
+
 # Talking machines
 
 This repo contains several PyTorch implementations of open-domain chatbots
@@ -35,31 +48,20 @@ Check your tokenization.
 
 # Model architectures
 
+* Original Transformer + conversation data wout persona info
+        
+    - Add full conversation
+    
+    - Add pre-trained embeddings: GloVe
+    
+* Original Transformer + conversation data with persona info used in a dummy way.
+
+* Original Transformer + conversation data + persona info encoded in a smarter way.
+
+* GPT2 fine-tuning like a Pro
+
+
 # Deployment to FB Messenger
-
-# WIP
-
-- [x] Save whole torchtet field object.
-- [x] Fit model using only last sentence from context.
-- [ ] Fit model without glove (decrease complexity and error sources).
-- [ ] Fit model for short targets only.
-
-- [ ] Get a decent model.
-    * [ ] + attention and context vector
-    * [ ] + feed context vector at next step
-
-Tricks & learnings:
-- [ ] Triple check the vocabulary you generated from the corpus.
-- [ ] Switch on gradient clipping.
-- [ ] Reduce LR on plateau (see [Reduce learning rate on plateau](https://github.com/marumalo/pytorch-seq2seq/blob/master/train.py))
-- [ ] Adjust teacher-forcing
-- [ ] Tie weights as in (here)[https://github.com/marumalo/pytorch-seq2seq/blob/master/model.py]
-- [ ] Implement beam-search decoding.
-
-
-Transformer:
-- [ ] Start transformer based chatbot.
-- [ ] Memory network to attend over personality?
 
 
 # References

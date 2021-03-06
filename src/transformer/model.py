@@ -10,27 +10,34 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 
+
 class Transformer(nn.Module):
 
     def __init__(
         self,
         model_dimension,
-        src_vocab_size,
-        trg_vocab_size,
+        # src_vocab_size,
+        # trg_vocab_size,
+        vocab_size,
         number_of_heads,
         number_of_layers,
         dropout_probability,
-        log_attention_weights=False
+        padding_idx: int,
+        log_attention_weights=False,
+        pretrained_embedding_vectors: Tensor = None,
     ):
         super().__init__()
-        self.trg_vocab_size = trg_vocab_size
+        self.trg_vocab_size = vocab_size  # TODO: to remove.
+        self.vocab_size = vocab_size
+        self.n_layers = number_of_layers
 
         # Embeds source/target token ids into embedding vectors
-        self.src_embedding = Embedding(src_vocab_size, model_dimension)
-        self.trg_embedding = Embedding(trg_vocab_size, model_dimension)
+        self.src_embedding = Embedding(vocab_size, model_dimension, padding_idx,
+                                       pretrained_embedding_vectors=pretrained_embedding_vectors)
+        self.trg_embedding = Embedding(vocab_size, model_dimension, padding_idx,
+                                       pretrained_embedding_vectors=pretrained_embedding_vectors)
 
         # Adds positional information to source/target token's embedding vector
-        # (otherwise we'd lose the positional information which is important in human languages)
         self.src_pos_embedding = PositionalEncoding(model_dimension, dropout_probability)
         self.trg_pos_embedding = PositionalEncoding(model_dimension, dropout_probability)
 
@@ -46,7 +53,7 @@ class Transformer(nn.Module):
 
         # Converts final target token representations into log probabilities
         # vectors of the target vocab size
-        self.decoder_generator = DecoderGenerator(model_dimension, trg_vocab_size)
+        self.decoder_generator = DecoderGenerator(model_dimension, vocab_size)
 
         self.init_params()
 
@@ -60,6 +67,17 @@ class Transformer(nn.Module):
             for name, p in self.named_parameters():
                 if p.dim() > 1:
                     nn.init.xavier_uniform_(p)
+
+    @property
+    def hyperparams(self):
+        return {
+            'vocab_size': self.vocab_size,
+            # 'embedding_dim': self.embedding_dim,
+            # 'hidden_dim': self.hidden_dim,
+            'n_layers': self.n_layers,
+            # 'n_directions_encoder': self.n_directions_encoder,
+            # 'pretrained_embeddings': self.pretrained_embeddings,
+        }
 
     def forward(
         self,
@@ -129,15 +147,13 @@ class Encoder(nn.Module):
 
     def __init__(self, encoder_layer, number_of_layers):
         super().__init__()
-        assert isinstance(encoder_layer, EncoderLayer), f'Expected EncoderLayer got {type(encoder_layer)}.'
+        assert isinstance(encoder_layer, EncoderLayer), \
+            f'Expected EncoderLayer got {type(encoder_layer)}.'
 
         self.encoder_layers = get_clones(encoder_layer, number_of_layers)
         self.norm = nn.LayerNorm(encoder_layer.model_dimension)
 
-    def forward(self, src_embeddings_batch, src_mask):
-        # Just update the naming so as to reflect the semantics of what this var will become (the initial encoder layer
-        # has embedding vectors as input but later layers have richer token representations)
-        src_representations_batch = src_embeddings_batch
+    def forward(self, src_representations_batch, src_mask):
 
         # Forward pass through the encoder stack
         for encoder_layer in self.encoder_layers:
@@ -187,9 +203,7 @@ class Decoder(nn.Module):
         self.decoder_layers = get_clones(decoder_layer, number_of_layers)
         self.norm = nn.LayerNorm(decoder_layer.model_dimension)
 
-    def forward(self, trg_embeddings_batch, src_representations_batch, trg_mask, src_mask):
-        # Just update the naming so as to reflect the semantics of what this var will become
-        trg_representations_batch = trg_embeddings_batch
+    def forward(self, trg_representations_batch, src_representations_batch, trg_mask, src_mask):
 
         # Forward pass through the decoder stack
         for decoder_layer in self.decoder_layers:
@@ -377,10 +391,25 @@ class PositionwiseFeedForwardNet(nn.Module):
 
 class Embedding(nn.Module):
 
-    def __init__(self, vocab_size, model_dimension):
+    def __init__(
+        self,
+        vocab_size: int,
+        model_dimension: int,
+        padding_idx: int,
+        pretrained_embedding_vectors: Tensor = None,
+    ):
         super().__init__()
 
-        self.embeddings_table = nn.Embedding(vocab_size, model_dimension)
+        # if len(pretrained_embedding_vectors.size()) == 0:
+        if pretrained_embedding_vectors is None:
+            # we will learn embeddings from scratch
+            self.embeddings_table = nn.Embedding(vocab_size, model_dimension,
+                                                 padding_idx=padding_idx)
+        else:
+            # we use pre-trained embeddings
+            self.embeddings_table = nn.Embedding.from_pretrained(
+                pretrained_embedding_vectors, padding_idx=padding_idx, freeze=False)
+
         self.model_dimension = model_dimension
 
     def forward(self, token_ids_batch):
@@ -463,7 +492,6 @@ def analyze_state_dict_shapes_and_names(model):
         if not param.requires_grad:
             raise Exception('Expected all of the params to be trainable - no param freezing used.')
 
-# Count how many trainable weights the model has <- just for having a feeling for how big the model is
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
