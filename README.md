@@ -2,9 +2,12 @@
 
 - [x] Start transformer based chatbot.
 - [x] Extend data utils to load persona info too.
-
 - [x] Implement data ingestion to include 'persona'
-- [ ] and think about the functions that generate the masks.
+- [x] Replace KLLoss by Cross-Entropy loss, and compute word perplexity.
+
+- [ ] Train model with persona information. Log output to tensorboard.
+- [ ] Train model without persona information. Log output to tensorboard.
+
 
 - [ ] BucketIterator.sort_key() to take into accoutn ex.persona
 - [ ] Rename: src -> history, tgt -> response.
@@ -50,13 +53,13 @@ Check your tokenization.
 
 * Original Transformer + conversation data wout persona info
         
-    - Add full conversation
+    - Add full conversation --> more data.
     
-    - Add pre-trained embeddings: GloVe
+    - Add pre-trained embeddings: GloVe --> transfer learning.
     
-* Original Transformer + conversation data with persona info used in a dummy way.
+* Original Transformer + conversation data with persona info used in a dummy way. --> more data.
 
-* Original Transformer + conversation data + persona info encoded in a smarter way.
+* Original Transformer + conversation data + persona info encoded in a smarter way. --> richer input representation
 
 * GPT2 fine-tuning like a Pro
 

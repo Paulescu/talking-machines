@@ -2,10 +2,12 @@ import os
 import json
 from pathlib import Path
 import pdb
+from typing import Union
 
+from tqdm.auto import tqdm
+import numpy as np
 import torch
 import torch.nn as nn
-from tqdm.auto import tqdm
 
 from src.util import get_random_id, get_dataset_size
 from .utils import (
@@ -23,17 +25,20 @@ class TransformerTrainer:
 
     def __init__(
         self,
-        model,
+        model: nn.Module,
         train_dataloader,
         val_dataloader,
         learning_rate: float,
         vocab,
-        pad_token_id,
-        checkpoint_dir,
+        pad_token_id: int,
+        checkpoint_dir: Union[Path, str],
         validation_freq: int,
         validation_n_examples: int,
+        loss_fn: str,
+        use_label_smoothing: bool = True,
         with_cuda: bool = True,
         debug: bool = False,
+        tensorboard_dir: Union[Path, str] = None,
     ):
         # store all input parameters as object members
         self.model = model
@@ -46,13 +51,19 @@ class TransformerTrainer:
         self.validation_freq = validation_freq
         self.validation_n_examples = validation_n_examples
         self.with_cuda = with_cuda
-        self.debug = debug
+        self.debug = debug       
+        assert loss_fn in {'kl', 'cross-entropy'}
+        self.loss_fn_name = loss_fn
+        if self.loss_fn_name == 'cross-entropy':
+            self.use_label_smoothing = False
+        else:    
+            self.use_label_smoothing = use_label_smoothing
 
         # set device for training
         cuda_condition = torch.cuda.is_available() and with_cuda
         self.device = torch.device('cuda' if cuda_condition else 'cpu')
 
-        self.loss_fn = self._get_loss_fn()
+        self.loss_fn = self._get_loss_fn(loss_fn)
         self.optimizer = self._get_optimizer()
         # self.learning_rate_scheduler = self._get_lr_scheduler()
         self.label_smoothing = self._get_label_smoothing()
@@ -73,6 +84,14 @@ class TransformerTrainer:
         # unique identifier for each run
         self.run_id = get_random_id()
 
+        # tensorboard
+        self.global_train_step = 0
+        self.global_val_step = 0
+        self.tensorboard_dir = tensorboard_dir
+        if self.tensorboard_dir:
+            from torch.utils.tensorboard import SummaryWriter
+            self.writer = SummaryWriter(tensorboard_dir)
+
     def train_test_loop(self, n_epochs):
         """
 
@@ -81,16 +100,19 @@ class TransformerTrainer:
 
             print(f'Epoch: {self.epochs:03d}')
 
-            train_loss = self.train()
-            test_loss = self.test()
+            train_metrics = self.train()
+            test_metrics = self.test()
 
             # print train/test losses
             log = '\nEpoch: {:03d}, Train loss: {:.4f}, Val loss: {:.4f}'
-            print(log.format(epoch, train_loss, test_loss))
+            print(log.format(epoch, train_metrics['loss'], test_metrics['loss']))
+            if self.loss_fn_name == 'cross-entropy':
+                log = '\nEpoch: {:03d}, Train ppl: {:.4f}, Val pll: {:.4f}'
+                print(log.format(epoch, train_metrics['ppl'], test_metrics['ppl']))
 
             # save checkpoint if test loss is lower than self.min_test_loss
-            if test_loss < self.min_test_loss:
-                self.min_test_loss = test_loss
+            if test_metrics['loss'] < self.min_test_loss:
+                self.min_test_loss = test_metrics['loss']
                 self.save()
 
             self.epochs += 1
@@ -106,6 +128,8 @@ class TransformerTrainer:
         with tqdm(total=self.train_size) as pbar:
 
             for batch_idx, batch in enumerate(self.train_dataloader):
+
+                self.global_train_step += 1
 
                 # get src and tgt tokens
                 src_token_ids, trg_token_ids_input, trg_token_ids_batch_gt = \
@@ -133,20 +157,20 @@ class TransformerTrainer:
                     trg_mask
                 )
 
-                smooth_target_distributions = self.label_smoothing(
-                    trg_token_ids_batch_gt)  # these are regular probabilities
+                # compute the loss               
+                if self.use_label_smoothing:
+                    smooth_target_distributions = self.label_smoothing(trg_token_ids_batch_gt)
+                    loss = self.loss_fn(predicted_log_distributions, smooth_target_distributions)
+                else:
+                    loss = self.loss_fn(predicted_log_distributions, trg_token_ids_batch_gt.squeeze(-1))
 
-                if self.debug:
-                    print('predicted_log_distributions: ', predicted_log_distributions.shape)
-                    print('smooth_target_distributions: ', smooth_target_distributions.shape)
-
+                # if self.debug:
+                #     print('predicted_log_distributions: ', predicted_log_distributions.shape)
+                #     print('smooth_target_distributions: ', smooth_target_distributions.shape)
                 self.optimizer.zero_grad()  # clean the trainable weights gradients in the computational graph
-                loss = self.loss_fn(predicted_log_distributions, smooth_target_distributions)
                 loss.backward()  # compute the gradients for every trainable weight in the computational graph
                 self.optimizer.step()  # apply the gradients to weights
-
-                # pdb.set_trace()
-
+                
                 epoch_loss += loss.item() * batch.batch_size
                 # epoch_tgt_tokens += num_trg_tokens
 
@@ -154,9 +178,17 @@ class TransformerTrainer:
                 pbar.update(batch.batch_size)
                 pbar.set_postfix({'Loss': loss.item()})
 
-        loss = epoch_loss / self.train_size
+                # save logs to tensorboard
+                if self.tensorboard_dir:
+                    writer.add_scalar('training_loss', loss.item(), self.global_train_step)
 
-        return loss
+        metrics = dict()
+        metrics['loss'] = epoch_loss / self.train_size
+        if self.loss_fn_name == 'cross-entropy':
+            perplexity = np.exp(metrics['loss'])
+            metrics['ppl'] = perplexity
+
+        return metrics
 
     @torch.no_grad()
     def test(self):
@@ -170,6 +202,8 @@ class TransformerTrainer:
         with tqdm(total=self.val_size) as pbar:
 
             for batch_idx, batch in enumerate(self.val_dataloader):
+                
+                global_val_step += 1
 
                 # get src and tgt tokens
                 src_token_ids, trg_token_ids_input, trg_token_ids_batch_gt = \
@@ -197,17 +231,19 @@ class TransformerTrainer:
                     trg_mask
                 )
 
-                smooth_target_distributions = self.label_smoothing(
-                    trg_token_ids_batch_gt)  # these are regular probabilities
+                # compute the loss               
+                if self.use_label_smoothing:
+                    smooth_target_distributions = self.label_smoothing(trg_token_ids_batch_gt)
+                    loss = self.loss_fn(predicted_log_distributions, smooth_target_distributions)
+                else:
+                    loss = self.loss_fn(predicted_log_distributions, trg_token_ids_batch_gt.squeeze(-1))
 
-                if self.debug:
-                    print('predicted_log_distributions: ',
-                          predicted_log_distributions.shape)
-                    print('smooth_target_distributions: ',
-                          smooth_target_distributions.shape)
+                # if self.debug:
+                #     print('predicted_log_distributions: ',
+                #           predicted_log_distributions.shape)
+                #     print('smooth_target_distributions: ',
+                #           smooth_target_distributions.shape)
 
-                loss = self.loss_fn(predicted_log_distributions,
-                                    smooth_target_distributions)
                 epoch_loss += loss.item()
                 epoch_tgt_tokens += num_trg_tokens
 
@@ -223,18 +259,21 @@ class TransformerTrainer:
                                          predicted_token_ids,
                                          n_examples=3)
 
+                if self.tensorboard_dir:
+                    writer.add_scalar('validation_loss', loss.item(), self.global_val_step)
+
                 n_batches += 1
                 n_examples += batch.batch_size
                 if n_examples > self.validation_n_examples:
                     break
 
-        loss = epoch_loss / n_batches
+        metrics = dict()
+        metrics['loss'] = epoch_loss / n_batches
+        if self.loss_fn_name == 'cross-entropy':
+            perplexity = np.exp(metrics['loss'])
+            metrics['ppl'] = perplexity
 
-        # print a few examples of model output, to get a qualitative measure
-        # of how good the model is
-
-
-        return loss
+        return metrics
 
     def save(self):
 
@@ -301,9 +340,16 @@ class TransformerTrainer:
             words = [self.vocab.itos[x] for x in ids]
             print('MODEL: ', ' '.join(words))
 
-    def _get_loss_fn(self):
+    def _get_loss_fn(self, fn: str):
         """Returns a KL divergence loss function"""
-        return nn.KLDivLoss(reduction='batchmean')
+        if fn == 'kl':
+            # KL divergence
+            return nn.KLDivLoss(reduction='batchmean')
+        elif fn == 'cross-entropy':
+            # cross-entropy
+            return nn.CrossEntropyLoss(ignore_index=self.pad_token_id, reduction='mean')
+        else:
+            raise Exception('Not implemented')
 
     def _get_optimizer(self):
         """Returns the optimizer specified in 'self.optimizer'"""
